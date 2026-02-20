@@ -95,3 +95,11 @@ export const Weapon = defineComponent({
   range: Types.f32,
   projectileSpeed: Types.f32,
 })
+
+/** Orbital Drone — orbits the Nexus and damages nearby enemies (Phase 4) */
+export const Drone = defineComponent({
+  orbitAngle:  Types.f32,   // current angle in radians
+  orbitRadius: Types.f32,   // distance from Nexus centre (px)
+  damage:      Types.f32,   // damage per attack pulse
+  lastAttack:  Types.f64,   // performance.now() timestamp (ms)
+})

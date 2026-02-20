@@ -18,6 +18,8 @@ import { bombSystem } from '../systems/BombSystem'
 import { blackholeSystem } from '../systems/BlackholeSystem'
 import { gemSystem } from '../systems/GemSystem'
 import { chestSystem } from '../systems/ChestSystem'
+import { evolutionSystem } from '../systems/EvolutionSystem'
+import { droneSystem, resetDroneSystem } from '../systems/DroneSystem'
 import { Enemy } from '../ecs/components'
 import { SkillTreeStore } from '../skilltree/SkillTreeStore'
 import { SkillTreeUI } from '../skilltree/SkillTreeUI'
@@ -101,6 +103,10 @@ export class Game {
   private nexusPulseTimer = 0
   private treePrevOpen = false
 
+  // Phase 4: Evolution unlock banner
+  private evolutionBanner!: Text
+  private evolutionBannerTimer = 0
+
   async init(): Promise<void> {
     this.app = new Application({
       width: CANVAS_WIDTH,
@@ -120,6 +126,17 @@ export class Game {
     this.levelUpUI     = new LevelUpUI(this.app)
     this.rouletteUI    = new RouletteUI(this.app)
     this.playerStatusUI = new PlayerStatusUI(this.app)
+
+    // Phase 4: Evolution unlock banner (hidden by default)
+    this.evolutionBanner = new Text('', new TextStyle({
+      fill: '#ff88ff', fontSize: 28, fontFamily: 'monospace', fontWeight: 'bold',
+      dropShadow: true, dropShadowColor: '#440044', dropShadowDistance: 4,
+    }))
+    this.evolutionBanner.anchor.set(0.5, 0)
+    this.evolutionBanner.x = CANVAS_WIDTH / 2
+    this.evolutionBanner.y = CANVAS_HEIGHT / 2 - 120
+    this.evolutionBanner.visible = false
+    this.app.stage.addChild(this.evolutionBanner)
 
     this.streamerMode = new StreamerMode()
     this.streamerUI   = new StreamerUI(this.app, this.streamerMode)
@@ -408,9 +425,11 @@ export class Game {
   // ---------------------------------------------------------------------------
 
   private refreshStatusHint(): void {
-    const p = this.world?.peripherals.length ?? 0
-    const c = this.world?.catalysts.length   ?? 0
-    this.statusHint.text = `◆${p}  ●${c}   [Shift] Status`
+    const p = this.world?.peripherals.length  ?? 0
+    const c = this.world?.catalysts.length    ?? 0
+    const e = this.world?.evolutions?.size    ?? 0
+    const evoTag = e > 0 ? `  ✦${e}` : ''
+    this.statusHint.text = `◆${p}  ●${c}${evoTag}   [Shift] Status`
   }
 
   private buildTreeButton(): void {
@@ -487,6 +506,9 @@ export class Game {
       (wave)  => { this.onWaveComplete(wave) },
     )
     resetSpawner()
+    resetDroneSystem()
+    this.evolutionBannerTimer = 0
+    if (this.evolutionBanner) this.evolutionBanner.visible = false
 
     this.waveText.text   = 'Prepare…'
     this.scoreText.text  = 'Score: 0'
@@ -636,6 +658,7 @@ export class Game {
     }
 
     // ── ECS Systems ────────────────────────────────────────────────────
+    evolutionSystem(this.world)  // Phase 4: must run first to inject behaviors before weapon systems
     enemyAISystem(this.world)
     weaponSystem(this.world)
     movementSystem(this.world, this.input)
@@ -646,6 +669,25 @@ export class Game {
     lifetimeSystem(this.world)
     gemSystem(this.world)
     chestSystem(this.world)
+    droneSystem(this.world)  // Phase 4: orbital drone attackers
+
+    // ── Evolution unlock banner ─────────────────────────────────────────
+    if (this.world.pendingEvolutionName) {
+      this.evolutionBanner.text    = `✦ EVOLUTION: ${this.world.pendingEvolutionName} ✦`
+      this.evolutionBanner.visible = true
+      this.evolutionBannerTimer    = 3.5   // show for 3.5 seconds
+      this.world.pendingEvolutionName = null
+      this.refreshStatusHint()
+    }
+    if (this.evolutionBannerTimer > 0) {
+      this.evolutionBannerTimer -= dt
+      // Fade out in the last 0.8 seconds
+      this.evolutionBanner.alpha = Math.min(1, this.evolutionBannerTimer / 0.8)
+      if (this.evolutionBannerTimer <= 0) {
+        this.evolutionBanner.visible = false
+        this.evolutionBanner.alpha   = 1
+      }
+    }
 
     const aliveEnemies = enemyQuery(this.world).length
     spawnerSystem(this.world, aliveEnemies)

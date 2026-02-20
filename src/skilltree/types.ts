@@ -64,6 +64,13 @@ export type BehaviorType =
   | 'KINETIC_HARVEST'        // (future) score pickups emit radiation damaging nearby enemies
   | 'DAMAGE_SCALES_WITH_SCORE' // (future) projectile damage increases with current score
   | 'ORBITAL_DRONES'         // (future) spawns orbiting combat drones when SP is spent
+  // ── Phase 4: Weapon Evolutions (1-to-1 Keystone + Catalyst lock-and-key) ──
+  | 'QUASAR_BEAM'            // rf_key + graviton_lens: supercharged plasma beam with massive AoE
+  | 'TECTONIC_DETONATOR'     // hs_key + uranium_core: explosions triple in radius and damage
+  | 'AEGIS_FORTRESS'         // bw_key + exo_casing: aura pulse rate triples, radius doubles
+  | 'VOID_SINGULARITY'       // wp_key + overclock_chip: blackholes persist 3× longer, pull twice as hard
+  | 'STORM_NETWORK'          // ch_key + replicator_matrix: chain lightning hits 3 extra targets
+  | 'QUANTUM_HARVESTER'      // co_key + hyper_coolant: orbital drones spawn every 500 XP, deal 2× damage
   // ── Legacy (not granted by any current node; kept for system compatibility) ─
   | 'INFINITE_PIERCE'        // projectile ignores collision — hits every enemy in path
   | 'PIERCING_1'             // passes through first enemy, stops on second

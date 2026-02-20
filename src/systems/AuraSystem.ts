@@ -23,9 +23,13 @@ export function auraSystem(world: GameWorld): void {
   const { stats } = world
   if (!stats.behaviors.has('AURA_DAMAGE')) return
 
+  // AEGIS_FORTRESS evolution: pulse rate triples
+  const isAegis       = stats.behaviors.has('AEGIS_FORTRESS')
+  const pulseInterval = isAegis ? PULSE_INTERVAL / 3 : PULSE_INTERVAL
+
   world.auraTimer += world.delta
-  if (world.auraTimer < PULSE_INTERVAL) return
-  world.auraTimer -= PULSE_INTERVAL
+  if (world.auraTimer < pulseInterval) return
+  world.auraTimer -= pulseInterval
 
   const neid  = world.nexusEid
   if (neid < 0) return
@@ -37,8 +41,12 @@ export function auraSystem(world: GameWorld): void {
   const hpRatio = stats.behaviors.has('SCALES_WITH_HP')
     ? maxHP / BASE_NEXUS_MAX_HP
     : 1
-  const radius    = BASE_RADIUS + hpRatio * 80
-  const auraDmg   = BASE_DAMAGE * hpRatio
+
+  // AEGIS_FORTRESS: doubles radius and triples damage on top of Supernova
+  const radiusMult  = isAegis ? 2.0 : 1.0
+  const damageMult  = isAegis ? 3.0 : 1.0
+  const radius    = (BASE_RADIUS + hpRatio * 80) * radiusMult
+  const auraDmg   = BASE_DAMAGE * hpRatio * damageMult
   const radiusSq  = radius * radius
   const spk       = Math.floor(10 * (1 + stats.scoreBonus) * stats.scoreMultiplier)
 

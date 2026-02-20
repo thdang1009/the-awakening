@@ -266,8 +266,8 @@ export function spawnerSystem(world: GameWorld, aliveEnemyCount: number): void {
       state.inGrace          = false
       state.enemiesRemaining = enemyCountForWave(world.wave)
       state.spawnTimer       = 0
-      // Spawn 1 elite per wave starting wave 2; +1 extra every 3 waves
-      state.elitesPending    = world.wave >= 2 ? 1 + Math.floor((world.wave - 2) / 3) : 0
+      // Elites first appear at wave 8; +1 extra every 4 waves after that
+      state.elitesPending    = world.wave >= 8 ? 1 + Math.floor((world.wave - 8) / 4) : 0
       _onWaveStart?.(world.wave)
     }
     return

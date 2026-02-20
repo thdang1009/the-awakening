@@ -81,6 +81,16 @@ export type GameWorld = ReturnType<typeof createWorld> & {
   pendingRoulette: boolean
   /** True while the Roulette slot machine overlay is visible */
   roulettePause: boolean
+
+  // ── Phase 4: Weapon Evolutions ─────────────────────────────────────────
+  /** IDs of unlocked evolutions (e.g. 'quasar_beam'). Used to avoid re-triggering. */
+  evolutions: Set<string>
+  /** Total XP ever collected across the run (for ORBITAL_DRONES / QUANTUM_HARVESTER spawn trigger) */
+  xpCollected: number
+  /** Consume-once: triggers the evolution unlock banner in Game.ts */
+  pendingEvolutionName: string | null
+  /** Pending drone spawns (written by EvolutionSystem, consumed by DroneSystem) */
+  pendingDrones: Array<{ x: number; y: number }>
 }
 
 export function createGameWorld(): GameWorld {
@@ -124,6 +134,12 @@ export function createGameWorld(): GameWorld {
   world.pendingChests   = []
   world.pendingRoulette = false
   world.roulettePause   = false
+
+  // Phase 4
+  world.evolutions           = new Set()
+  world.xpCollected          = 0
+  world.pendingEvolutionName = null
+  world.pendingDrones        = []
 
   return world
 }

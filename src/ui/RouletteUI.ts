@@ -1,9 +1,8 @@
 // ---------------------------------------------------------------------------
 // RouletteUI — Golden Chest slot-machine overlay (Phase 3)
 // ---------------------------------------------------------------------------
-// 3 reels spin and stop one by one.  The middle reel (index 1) determines
-// the actual reward.  After all 3 stop the reward is auto-collected with a
-// flash, then the overlay closes and the callback fires.
+// Single reel spins and slows to a stop, revealing 1 Passive Catalyst
+// (List 4) reward.  Auto-collects after a pause so the player can read it.
 // ---------------------------------------------------------------------------
 
 import { Container, Graphics, Text, TextStyle } from 'pixi.js'
@@ -11,23 +10,24 @@ import { Application } from 'pixi.js'
 import { GameWorld } from '../ecs/world'
 import { COLLECTIBLES, type Collectible } from './LevelUpUI'
 
-// Reel stop times (seconds)
-const STOP_TIMES = [1.3, 2.1, 2.9]
-const COLLECT_DELAY = 3.5   // auto-collect after this total elapsed
-const CYCLE_RATE    = 9     // items cycled per second while spinning
+// ---------------------------------------------------------------------------
+// Timing & layout
+// ---------------------------------------------------------------------------
+const STOP_TIME     = 3.2    // reel stops at this elapsed time (seconds)
+const COLLECT_DELAY = 5.5    // auto-collect after this total elapsed
+const CYCLE_RATE    = 8      // items cycled per second at full spin speed
+const CYCLE_SLOW    = 3      // reduced cycle rate during wind-down phase
+const SLOW_START    = 2.0    // when the reel starts slowing down
 
-const REEL_W = 220
-const REEL_H = 130
-const REEL_GAP = 24
-const TOTAL_W = REEL_W * 3 + REEL_GAP * 2
-const ORIGIN_X = (1280 - TOTAL_W) / 2
-const ORIGIN_Y = (720  - REEL_H)  / 2 + 30
+const REEL_W   = 360
+const REEL_H   = 200
+const ORIGIN_X = (1280 - REEL_W) / 2
+const ORIGIN_Y = (720  - REEL_H) / 2 + 20
 
 // ---------------------------------------------------------------------------
 
 interface ReelState {
-  elapsed:   number
-  cyclePos:  number     // fractional index into ITEMS for cycling display
+  cyclePos:  number     // fractional index into COLLECTIBLES for display
   stopped:   boolean
   target:    Collectible
 }
@@ -37,7 +37,7 @@ export class RouletteUI {
   private isOpen = false
 
   // live state
-  private reels:    ReelState[] = []
+  private reel:     ReelState | null = null
   private elapsed   = 0
   private winner:   Collectible | null = null
   private collected = false
@@ -45,11 +45,11 @@ export class RouletteUI {
   private world:    GameWorld | null = null
 
   // pixi objects updated each animate() tick
-  private reelCards: Container[] = []
-  private reelNameTexts: Text[]  = []
-  private reelBgs:   Graphics[]  = []
+  private reelBg!:      Graphics
+  private reelNameTxt!: Text
   private resultBanner!: Text
-  private flashTimer = 0
+  private flashTimer  = 0
+  private countdownTxt!: Text
 
   constructor(app: Application) {
     this.container = new Container()
@@ -69,21 +69,23 @@ export class RouletteUI {
     this.container.visible = true
     this.container.removeChildren()
 
-    // Pick winner from catalyst pool (more thematic for chest drops)
+    // Winner is always from List 4: Passive Catalysts
     const catalysts = COLLECTIBLES.filter(it => it.category === 'catalyst')
     const pool      = catalysts.length > 0 ? catalysts : COLLECTIBLES
     this.winner     = pool[Math.floor(Math.random() * pool.length)]
 
-    // Build 3 reels with the winner locked to reel index 1 (middle)
-    this.reels = STOP_TIMES.map((_, i) => ({
-      elapsed:  0,
+    this.reel = {
       cyclePos: Math.random() * COLLECTIBLES.length,
       stopped:  false,
-      target:   i === 1 ? this.winner! : pool[Math.floor(Math.random() * pool.length)],
-    }))
+      target:   this.winner,
+    }
 
     this.buildLayout()
   }
+
+  // ---------------------------------------------------------------------------
+  // Build static chrome
+  // ---------------------------------------------------------------------------
 
   private buildLayout(): void {
     // Dark backdrop
@@ -94,21 +96,26 @@ export class RouletteUI {
     this.container.addChild(overlay)
 
     // Decorative outer panel
-    const panelW = TOTAL_W + 60
-    const panelH = REEL_H  + 160
+    const panelW = REEL_W + 80
+    const panelH = REEL_H + 200
     const panelX = (1280 - panelW) / 2
-    const panelY = ORIGIN_Y - 80
+    const panelY = ORIGIN_Y - 90
     const panel  = new Graphics()
     panel.lineStyle(3, 0xffd700, 1)
-    panel.beginFill(0x08091a, 0.96)
-    panel.drawRoundedRect(panelX, panelY, panelW, panelH, 16)
+    panel.beginFill(0x08091a, 0.97)
+    panel.drawRoundedRect(panelX, panelY, panelW, panelH, 18)
     panel.endFill()
     this.container.addChild(panel)
 
     // Corner stars
-    for (const [sx, sy] of [[panelX + 16, panelY + 16], [panelX + panelW - 16, panelY + 16],
-                             [panelX + 16, panelY + panelH - 16], [panelX + panelW - 16, panelY + panelH - 16]]) {
-      const star = new Text('★', new TextStyle({ fill: '#ffd700', fontSize: 18 }))
+    const corners: [number, number][] = [
+      [panelX + 18, panelY + 18],
+      [panelX + panelW - 18, panelY + 18],
+      [panelX + 18, panelY + panelH - 18],
+      [panelX + panelW - 18, panelY + panelH - 18],
+    ]
+    for (const [sx, sy] of corners) {
+      const star = new Text('★', new TextStyle({ fill: '#ffd700', fontSize: 20 }))
       star.anchor.set(0.5)
       star.x = sx; star.y = sy
       this.container.addChild(star)
@@ -120,117 +127,136 @@ export class RouletteUI {
       dropShadow: true, dropShadowColor: '#ff8800', dropShadowDistance: 4,
     }))
     header.anchor.set(0.5, 0)
-    header.x = 640; header.y = panelY + 18
+    header.x = 640; header.y = panelY + 20
     this.container.addChild(header)
 
-    const sub = new Text('— SPIN —', new TextStyle({
+    const sub = new Text('— Passive Catalyst —', new TextStyle({
       fill: '#aa7700', fontSize: 14, fontFamily: 'monospace',
     }))
-    sub.anchor.set(0.5, 0); sub.x = 640; sub.y = panelY + 54
+    sub.anchor.set(0.5, 0); sub.x = 640; sub.y = panelY + 58
     this.container.addChild(sub)
 
     // Reel divider line
     const line = new Graphics()
     line.lineStyle(1, 0x334466, 0.6)
-    line.moveTo(panelX + 20, ORIGIN_Y - 12)
-    line.lineTo(panelX + panelW - 20, ORIGIN_Y - 12)
+    line.moveTo(panelX + 20, ORIGIN_Y - 14)
+    line.lineTo(panelX + panelW - 20, ORIGIN_Y - 14)
     this.container.addChild(line)
 
-    // 3 reel cards
-    this.reelCards     = []
-    this.reelNameTexts = []
-    this.reelBgs       = []
+    // Reel card (mutable each tick)
+    const reelCard = new Container()
+    reelCard.x = ORIGIN_X
+    reelCard.y = ORIGIN_Y
+    this.container.addChild(reelCard)
 
-    for (let i = 0; i < 3; i++) {
-      const card = new Container()
-      card.x = ORIGIN_X + i * (REEL_W + REEL_GAP)
-      card.y = ORIGIN_Y
-      this.container.addChild(card)
-      this.reelCards.push(card)
+    this.reelBg = new Graphics()
+    reelCard.addChild(this.reelBg)
 
-      const bg = new Graphics()
-      card.addChild(bg)
-      this.reelBgs.push(bg)
+    // Category badge
+    const catBadge = new Text('● PASSIVE CATALYST', new TextStyle({
+      fill: '#00ccff', fontSize: 12, fontFamily: 'monospace', fontWeight: 'bold',
+    }))
+    catBadge.x = 14; catBadge.y = 14
+    reelCard.addChild(catBadge)
 
-      const nameTxt = new Text('', new TextStyle({
-        fill: '#ffffff', fontSize: 15, fontFamily: 'monospace', fontWeight: 'bold',
-        wordWrap: true, wordWrapWidth: REEL_W - 20, align: 'center',
-      }))
-      nameTxt.anchor.set(0.5)
-      nameTxt.x = REEL_W / 2; nameTxt.y = REEL_H / 2
-      card.addChild(nameTxt)
-      this.reelNameTexts.push(nameTxt)
-    }
+    this.reelNameTxt = new Text('', new TextStyle({
+      fill: '#ffffff', fontSize: 22, fontFamily: 'monospace', fontWeight: 'bold',
+      wordWrap: true, wordWrapWidth: REEL_W - 28, align: 'center',
+    }))
+    this.reelNameTxt.anchor.set(0.5)
+    this.reelNameTxt.x = REEL_W / 2; this.reelNameTxt.y = REEL_H / 2 + 10
+    reelCard.addChild(this.reelNameTxt)
 
-    // Result banner (hidden until collected)
+    // Result banner (hidden until reel stops)
     this.resultBanner = new Text('', new TextStyle({
-      fill: '#ffd700', fontSize: 22, fontFamily: 'monospace', fontWeight: 'bold',
+      fill: '#ffd700', fontSize: 20, fontFamily: 'monospace', fontWeight: 'bold',
       dropShadow: true, dropShadowColor: '#000000', dropShadowDistance: 3,
     }))
     this.resultBanner.anchor.set(0.5, 0)
     this.resultBanner.x = 640
-    this.resultBanner.y = panelY + panelH - 52
+    this.resultBanner.y = panelY + panelH - 72
     this.container.addChild(this.resultBanner)
+
+    // Countdown hint
+    this.countdownTxt = new Text('', new TextStyle({
+      fill: '#556677', fontSize: 12, fontFamily: 'monospace',
+    }))
+    this.countdownTxt.anchor.set(0.5, 0)
+    this.countdownTxt.x = 640
+    this.countdownTxt.y = panelY + panelH - 40
+    this.container.addChild(this.countdownTxt)
   }
 
-  /** Called every frame from Game.ts — runs even while game is paused */
+  // ---------------------------------------------------------------------------
+  // Per-frame update — called even while game is paused
+  // ---------------------------------------------------------------------------
+
   animate(dt: number): void {
-    if (!this.isOpen || this.reels.length === 0) return
+    if (!this.isOpen || !this.reel) return
     this.elapsed += dt
 
-    // Animate each reel
-    for (let i = 0; i < 3; i++) {
-      const reel = this.reels[i]
-      const bg   = this.reelBgs[i]
-      const txt  = this.reelNameTexts[i]
-      const stopAt = STOP_TIMES[i]
+    const reel = this.reel
 
-      if (!reel.stopped) {
-        reel.cyclePos += CYCLE_RATE * dt
-        if (this.elapsed >= stopAt) {
-          reel.stopped  = true
-          reel.cyclePos = Math.floor(reel.cyclePos) // snap to integer
-        }
+    // Spin / wind-down logic
+    if (!reel.stopped) {
+      // Interpolate from full speed down to slow speed as we approach STOP_TIME
+      const slowFrac = Math.max(0, Math.min(1, (this.elapsed - SLOW_START) / (STOP_TIME - SLOW_START)))
+      const rate     = CYCLE_RATE * (1 - slowFrac) + CYCLE_SLOW * slowFrac
+      reel.cyclePos += rate * dt
+
+      if (this.elapsed >= STOP_TIME) {
+        reel.stopped  = true
+        reel.cyclePos = Math.round(reel.cyclePos) // snap to integer
       }
-
-      const item = reel.stopped
-        ? reel.target
-        : COLLECTIBLES[Math.floor(reel.cyclePos) % COLLECTIBLES.length]
-
-      // Draw reel card
-      const borderColor = reel.stopped ? item.color : 0x334466
-      const borderAlpha = reel.stopped ? 1.0 : 0.5
-      bg.clear()
-      bg.lineStyle(2, borderColor, borderAlpha)
-      bg.beginFill(reel.stopped ? 0x0d1526 : 0x090e1a, 0.95)
-      bg.drawRoundedRect(0, 0, REEL_W, REEL_H, 10)
-      bg.endFill()
-
-      // Spinning flash effect
-      if (!reel.stopped) {
-        const flash = Math.sin(this.elapsed * 30) * 0.5 + 0.5
-        bg.lineStyle(1, 0x667799, flash * 0.3)
-        bg.drawRoundedRect(4, 4, REEL_W - 8, REEL_H - 8, 8)
-      } else {
-        // Glow ring for stopped reel
-        bg.lineStyle(1, item.color, 0.35)
-        bg.drawRoundedRect(4, 4, REEL_W - 8, REEL_H - 8, 8)
-      }
-
-      txt.text  = item.name
-      txt.style.fill = reel.stopped ? '#ffffff' : '#778899'
     }
 
-    // Flash winner reel after stop
-    if (this.elapsed > STOP_TIMES[2]) {
+    // Which item to display
+    const item = reel.stopped
+      ? reel.target
+      : COLLECTIBLES[Math.floor(reel.cyclePos) % COLLECTIBLES.length]
+
+    // Redraw reel card background
+    const borderColor = reel.stopped ? item.color : 0x334466
+    const borderAlpha = reel.stopped ? 1.0 : 0.5
+    this.reelBg.clear()
+    this.reelBg.lineStyle(3, borderColor, borderAlpha)
+    this.reelBg.beginFill(reel.stopped ? 0x0d1526 : 0x090e1a, 0.97)
+    this.reelBg.drawRoundedRect(0, 0, REEL_W, REEL_H, 14)
+    this.reelBg.endFill()
+
+    if (!reel.stopped) {
+      // Spinning shimmer effect
+      const flash = Math.sin(this.elapsed * 25) * 0.5 + 0.5
+      this.reelBg.lineStyle(1, 0x667799, flash * 0.35)
+      this.reelBg.drawRoundedRect(5, 5, REEL_W - 10, REEL_H - 10, 11)
+    } else {
+      // Glow ring
+      this.reelBg.lineStyle(2, item.color, 0.4)
+      this.reelBg.drawRoundedRect(5, 5, REEL_W - 10, REEL_H - 10, 11)
+    }
+
+    this.reelNameTxt.text            = item.name
+    this.reelNameTxt.style.fill      = reel.stopped ? '#ffffff' : '#778899'
+    this.reelNameTxt.style.fontSize  = reel.stopped ? 22 : 18
+
+    // Pulse glow on winner reel after it stops
+    if (reel.stopped) {
       this.flashTimer += dt
-      const pulse = Math.sin(this.flashTimer * 8) * 0.5 + 0.5
-      this.reelBgs[1].alpha = 0.7 + pulse * 0.3
+      const pulse = Math.sin(this.flashTimer * 7) * 0.5 + 0.5
+      this.reelBg.alpha = 0.75 + pulse * 0.25
     }
 
-    // Result banner
-    if (this.elapsed > STOP_TIMES[2] + 0.3 && this.winner) {
-      this.resultBanner.text = `YOU GOT: ${this.winner.name}!`
+    // Show result banner shortly after stop
+    if (this.elapsed > STOP_TIME + 0.4 && this.winner) {
+      this.resultBanner.text = `YOU GOT:  ${this.winner.name}!`
+    }
+
+    // Countdown to auto-collect
+    if (this.elapsed > STOP_TIME + 0.5) {
+      const remaining = Math.max(0, COLLECT_DELAY - this.elapsed)
+      this.countdownTxt.text = remaining > 0
+        ? `auto-collecting in ${remaining.toFixed(1)}s…`
+        : ''
     }
 
     // Auto-collect
@@ -241,10 +267,12 @@ export class RouletteUI {
     }
   }
 
+  // ---------------------------------------------------------------------------
+
   private close(): void {
     this.isOpen = false
     this.container.visible = false
-    this.reels = []
+    this.reel   = null
     this.winner = null
     this.onDone?.()
     this.onDone = null

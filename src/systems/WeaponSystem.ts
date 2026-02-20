@@ -109,8 +109,8 @@ export function weaponSystem(world: GameWorld): void {
   const dt     = world.delta
   const { stats } = world
 
-  // ── RADIANT SUPERNOVA: stop all projectile fire ──────────────────────────
-  if (stats.behaviors.has('AURA_DAMAGE') && stats.behaviors.has('SCALES_WITH_HP')) return
+  // Phase 4: Keystones run in parallel — RADIANT SUPERNOVA no longer suppresses projectile fire.
+  // AURA_DAMAGE + SCALES_WITH_HP (Supernova) now STACKS with all other weapon modes.
 
   // ── THERMAL_ACCELERATION: ramp fire rate during sustained fire ───────────
   const now        = performance.now()
@@ -170,10 +170,18 @@ export function weaponSystem(world: GameWorld): void {
 
     const sweepDeg   = world.beamAngle * (180 / Math.PI)
     const totalShots = Math.max(1, 1 + Math.floor(stats.multishotAdd))
+
+    // QUASAR_BEAM evolution: much larger bolts, higher damage, tighter spread
+    const isQuasar   = stats.behaviors.has('QUASAR_BEAM')
+    const beamScale  = isQuasar ? 5.5 : 2.2
+    const beamDmg    = isQuasar ? dmg * 2.5 : dmg
+    const beamTint   = isQuasar ? 0xff88ff : 0xffffff
+    const beamSpread = isQuasar ? 5 : 7
+
     for (let i = 0; i < totalShots; i++) {
-      const offset = (i - (totalShots - 1) / 2) * 7
-      spawnProjectile(world, nx, ny, sweepDeg + offset, dmg, spd, true,
-        0xffffff, 2.2)   // white, fat beam bolt
+      const offset = (i - (totalShots - 1) / 2) * beamSpread
+      spawnProjectile(world, nx, ny, sweepDeg + offset, beamDmg, spd, true,
+        beamTint, beamScale)
     }
     return
   }
@@ -192,11 +200,38 @@ export function weaponSystem(world: GameWorld): void {
 
   const isSeeker    = stats.behaviors.has('SEEKER')
   const isBoomerang = stats.behaviors.has('BOOMERANG')
+  const isStorm     = stats.behaviors.has('STORM_NETWORK')
+
+  // STORM_NETWORK evolution: fire at top 4 enemies simultaneously (chain-style)
+  if (isStorm || stats.behaviors.has('CHAIN_LIGHTNING')) {
+    const CHAIN_TARGETS = isStorm ? 4 : 2
+    const CHAIN_RANGE   = isStorm ? range * 1.8 : range * 1.2
+    const allEnemies    = enemyPositionQuery(world)
+    const byDist: Array<{ eid: number; d2: number }> = []
+    for (let i = 0; i < allEnemies.length; i++) {
+      const eid = allEnemies[i]
+      const dx = Position.x[eid] - nx
+      const dy = Position.y[eid] - ny
+      const d2 = dx * dx + dy * dy
+      if (d2 < CHAIN_RANGE * CHAIN_RANGE) byDist.push({ eid, d2 })
+    }
+    byDist.sort((a, b) => a.d2 - b.d2)
+    const targets = byDist.slice(0, CHAIN_TARGETS)
+    const lightningTint = isStorm ? 0x88ffff : 0xaaaaff
+    const lightningScale = isStorm ? 1.8 : 1.0
+    for (const { eid } of targets) {
+      const ex = Position.x[eid]
+      const ey = Position.y[eid]
+      const a  = Math.atan2(ey - ny, ex - nx) * (180 / Math.PI)
+      spawnProjectile(world, nx, ny, a, isStorm ? dmg * 1.5 : dmg,
+        spd * 1.4, true, lightningTint, lightningScale)
+    }
+    return
+  }
 
   // Tint and scale by firing mode
   const tint  = isSeeker    ? 0xcc44ff   // purple seeker
               : isBoomerang ? 0x44ffff   // cyan boomerang
-              : stats.behaviors.has('CHAIN_LIGHTNING') ? 0xaaaaff  // pale lightning
               : 0xffee44                 // default yellow
   const scale = isBoomerang ? 1.2 : 1.0
 

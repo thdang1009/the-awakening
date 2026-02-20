@@ -8,6 +8,7 @@
 import { Application, Container, Graphics, Text, TextStyle } from 'pixi.js'
 import { GameWorld } from '../ecs/world'
 import { COLLECTIBLE_MAP } from './LevelUpUI'
+import { EVOLUTION_RECIPES } from '../systems/EvolutionSystem'
 import {
   CANVAS_WIDTH, CANVAS_HEIGHT,
   BASE_NEXUS_MAX_HP, BASE_PROJECTILE_DAMAGE, BASE_FIRE_RATE,
@@ -300,6 +301,7 @@ export class PlayerStatusUI {
       }))
       none.x = x; none.y = curY
       this.container.addChild(none)
+      curY += 20
     } else {
       const counts = countIds(world.catalysts)
       for (const [id, count] of counts) {
@@ -313,6 +315,33 @@ export class PlayerStatusUI {
           'catalyst',
         )
         curY += 38
+      }
+    }
+
+    // ── Phase 4: Weapon Evolutions ─────────────────────────────────────────
+    if (world.evolutions && world.evolutions.size > 0) {
+      curY += 12
+      const evoDiv = new Graphics()
+      evoDiv.lineStyle(1, 0x441166, 0.7)
+      evoDiv.moveTo(x, curY); evoDiv.lineTo(x + colW, curY)
+      this.container.addChild(evoDiv)
+      curY += 14
+
+      const evoTitle = new Text('✦  WEAPON EVOLUTIONS  (Phase 4)', new TextStyle({
+        fill: '#ff88ff', fontSize: 13, fontFamily: 'monospace', fontWeight: 'bold',
+      }))
+      evoTitle.x = x; evoTitle.y = curY
+      this.container.addChild(evoTitle)
+      curY += 22
+
+      for (const recipe of EVOLUTION_RECIPES) {
+        if (!world.evolutions.has(recipe.id)) continue
+        const evoRow = new Text(`★ ${recipe.displayName}`, new TextStyle({
+          fill: '#ff88ff', fontSize: 12, fontFamily: 'monospace', fontWeight: 'bold',
+        }))
+        evoRow.x = x; evoRow.y = curY
+        this.container.addChild(evoRow)
+        curY += 20
       }
     }
   }

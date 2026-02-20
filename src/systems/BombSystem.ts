@@ -42,8 +42,9 @@ export function bombSystem(world: GameWorld): void {
     // ── DETONATE ──────────────────────────────────────────────────────────
     const bx     = Position.x[bid]
     const by     = Position.y[bid]
-    const dmg    = Bomb.damage[bid]
-    const radius = Bomb.radius[bid]
+    const isTectonic = world.stats.behaviors.has('TECTONIC_DETONATOR')
+    const dmg    = Bomb.damage[bid]  * (isTectonic ? 3.0 : 1.0)
+    const radius = Bomb.radius[bid]  * (isTectonic ? 3.0 : 1.0)
     const rSq    = radius * radius
     const enemies = enemyQuery(world)
 

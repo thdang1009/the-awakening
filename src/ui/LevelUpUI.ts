@@ -187,7 +187,7 @@ export class LevelUpUI {
     header.y = ORIGIN_Y - 60
     this.container.addChild(header)
 
-    const subtext = new Text('Choose a Peripheral Weapon or Passive Catalyst', new TextStyle({
+    const subtext = new Text('Choose a Peripheral Weapon', new TextStyle({
       fill: '#aabbcc', fontSize: 16, fontFamily: 'monospace',
     }))
     subtext.anchor.set(0.5, 0)
@@ -195,12 +195,14 @@ export class LevelUpUI {
     subtext.y = ORIGIN_Y - 24
     this.container.addChild(subtext)
 
-    // 3 random unique cards, avoiding already-owned where possible
-    const available = COLLECTIBLES.filter(c =>
-      !world.peripherals.includes(c.id) && !world.catalysts.includes(c.id),
-    )
-    const pool   = available.length >= 3 ? available : COLLECTIBLES
-    const chosen = shuffled(pool).slice(0, 3)
+    // Level-up: 3 cards drawn exclusively from List 3 (Peripheral Weapons).
+    // Prefer unowned ones; allow repeats when the full List 3 pool is small.
+    const periOnly  = COLLECTIBLES.filter(c => c.category === 'peripheral')
+    const unowned   = periOnly.filter(c => !world.peripherals.includes(c.id))
+    const base      = unowned.length > 0 ? unowned : periOnly
+    // Pad to at least 3 by repeating the peripheral list so we always show 3 cards
+    const padded    = [...base, ...periOnly, ...periOnly]
+    const chosen    = shuffled(padded).slice(0, 3)
 
     chosen.forEach((item, idx) => {
       const cardX = ORIGIN_X + idx * (CARD_W + CARD_GAP)

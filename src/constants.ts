@@ -66,10 +66,10 @@ export const BOSS_DAMAGE          = 35
 export const BOSS_ATTACK_COOLDOWN = 1.2   // seconds between hits
 
 // Elite enemy
-export const ELITE_HP_MULT       = 6      // HP multiplier vs normal enemy at same wave
-export const ELITE_SPEED_MULT    = 0.65   // slower but tankier
-export const ELITE_SCALE         = 1.9    // visual scale
-export const ELITE_DAMAGE_MULT   = 1.5
+export const ELITE_HP_MULT       = 20     // HP multiplier vs normal enemy at same wave
+export const ELITE_SPEED_MULT    = 0.50   // noticeably slower, but extremely tanky
+export const ELITE_SCALE         = 2.4    // visual scale — visibly imposing
+export const ELITE_DAMAGE_MULT   = 3.0    // hits very hard
 export const ELITE_SCORE_MULT    = 5      // score bonus multiplier per elite kill
 
 // Golden Chest

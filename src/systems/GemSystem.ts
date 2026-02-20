@@ -105,7 +105,9 @@ export function gemSystem(world: GameWorld): void {
 
   // 3. Collect gems — award XP and remove entities
   for (const geid of toCollect) {
-    world.xp += ExperienceGem.value[geid]
+    const xpVal = ExperienceGem.value[geid]
+    world.xp         += xpVal
+    world.xpCollected += xpVal   // Phase 4: lifetime XP counter for drone spawn triggers
     removeEntity(world, geid)
   }
 
