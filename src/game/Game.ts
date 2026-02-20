@@ -3,7 +3,7 @@ import {
 } from 'pixi.js'
 import { addComponent, addEntity, defineQuery } from 'bitecs'
 import {
-  Position, Health, Collider, IsNexus, Weapon, Renderable,
+  Position, Health, Collider, IsNexus, Weapon, Renderable, Velocity,
 } from '../ecs/components'
 import { GameWorld, createGameWorld } from '../ecs/world'
 import { RenderSystem } from '../systems/RenderSystem'
@@ -16,11 +16,14 @@ import { spawnerSystem, resetSpawner, setSpawnerCallbacks } from '../systems/Spa
 import { auraSystem } from '../systems/AuraSystem'
 import { bombSystem } from '../systems/BombSystem'
 import { blackholeSystem } from '../systems/BlackholeSystem'
+import { gemSystem } from '../systems/GemSystem'
 import { Enemy } from '../ecs/components'
 import { SkillTreeStore } from '../skilltree/SkillTreeStore'
 import { SkillTreeUI } from '../skilltree/SkillTreeUI'
 import { StreamerMode } from '../streamer/StreamerMode'
 import { StreamerUI } from '../streamer/StreamerUI'
+import { InputManager } from '../input/InputManager'
+import { LevelUpUI, ITEMS } from '../ui/LevelUpUI'
 import {
   CANVAS_WIDTH, CANVAS_HEIGHT,
   NEXUS_RADIUS, NEXUS_X, NEXUS_Y,
@@ -34,6 +37,12 @@ import type { ComputedStats } from '../skilltree/types'
 
 const enemyQuery = defineQuery([Enemy])
 
+// Grid tile size for the infinite background
+const GRID_TILE = 64
+// How many tiles to draw beyond the viewport in each direction
+const GRID_HALF_TILES_X = Math.ceil(CANVAS_WIDTH  / GRID_TILE) + 2
+const GRID_HALF_TILES_Y = Math.ceil(CANVAS_HEIGHT / GRID_TILE) + 2
+
 // ---------------------------------------------------------------------------
 // Stat applicator — maps ComputedStats → Nexus ECS components
 // ---------------------------------------------------------------------------
@@ -41,19 +50,15 @@ function applyStatsToNexus(world: GameWorld, stats: ComputedStats): void {
   const neid = world.nexusEid
   if (neid < 0) return
 
-  // Fire rate: additive bonus pool × multiplicative product
   Weapon.fireRate[neid] =
     BASE_FIRE_RATE * (1 + stats.fireRateBonus) * stats.fireRateMultiplier
 
-  // Damage: same two-tier formula
   Weapon.damage[neid] =
     BASE_PROJECTILE_DAMAGE * (1 + stats.damageBonus) * stats.damageMultiplier
 
-  // Range & speed (additive only)
   Weapon.range[neid]           = BASE_WEAPON_RANGE     * (1 + stats.rangeBonus)
   Weapon.projectileSpeed[neid] = BASE_PROJECTILE_SPEED * (1 + stats.speedBonus)
 
-  // Max HP — preserve current HP ratio to avoid instant death on tree change
   const maxHP = BASE_NEXUS_MAX_HP * (1 + stats.maxHPBonus) * stats.maxHPMultiplier
   const ratio = Health.current[neid] / Health.max[neid]
   Health.max[neid]     = maxHP
@@ -65,22 +70,32 @@ export class Game {
   private world!: GameWorld
   private renderSystem!: RenderSystem
   private gameContainer!: Container
+  private bgGraphics!: Graphics     // tiling world-space background grid
   private textures: Texture[] = []
+
+  // Input
+  private input!: InputManager
 
   // UI refs
   private hpBarFill!: Graphics
+  private xpBarFill!: Graphics
+  private xpBarBg!: Graphics
   private waveText!: Text
   private scoreText!: Text
-  private spBadge!: Text          // skill-point badge on tree button
-  private contextBadge!: Text | null  // shows active context event (night/weekend/etc)
+  private levelText!: Text
+  private spBadge!: Text
+  private contextBadge!: Text | null
   private gameOverContainer!: Container
   private waveResultText!: Text
+  private inventoryPanel!: Container  // left-side collected items list
+  private inventoryOpen = false       // toggled by Shift key
 
   private treeUI!: SkillTreeUI
+  private levelUpUI!: LevelUpUI
   private streamerMode!: StreamerMode
   private streamerUI!: StreamerUI
   private nexusPulseTimer = 0
-  private treePrevOpen = false  // track tree open state to detect close event
+  private treePrevOpen = false
 
   async init(): Promise<void> {
     this.app = new Application({
@@ -93,41 +108,39 @@ export class Game {
     })
     document.body.appendChild(this.app.view as HTMLCanvasElement)
 
+    this.input    = new InputManager()
     this.textures = this.generateTextures()
-    this.buildScene()        // bg, gameContainer, UI layers
-    this.buildTreeButton()   // must be before SkillTreeUI (passes container ref)
-    this.treeUI = new SkillTreeUI(this.app, new Container())
+    this.buildScene()
+    this.buildTreeButton()
+    this.treeUI    = new SkillTreeUI(this.app, new Container())
+    this.levelUpUI = new LevelUpUI(this.app)
 
-    // Streamer mode
     this.streamerMode = new StreamerMode()
     this.streamerUI   = new StreamerUI(this.app, this.streamerMode)
     this.streamerUI.onCommand((evt) => {
       if (!this.world || this.world.gameOver) return
       switch (evt.command) {
-        case 'spawn':
-          this.world.buffs.spawnWaveRequest = true
-          break
+        case 'spawn': this.world.buffs.spawnWaveRequest = true; break
         case 'buff':
           this.world.buffs.fireRateMult  = 2
           this.world.buffs.fireRateTimer = 10
           break
-        case 'boss':
-          this.world.buffs.spawnBossRequest = true
-          break
-        case 'heal':
-          this.world.buffs.healRequest = true
-          break
+        case 'boss':  this.world.buffs.spawnBossRequest = true; break
+        case 'heal':  this.world.buffs.healRequest = true; break
       }
     })
 
-    // Refresh SP badge whenever store changes
     SkillTreeStore.onChange(() => {
       this.spBadge.text = `SP: ${SkillTreeStore.skillPoints}`
     })
 
-    // Tab key toggles the tree
     document.addEventListener('keydown', (e) => {
       if (e.code === 'Tab') { e.preventDefault(); this.toggleTree() }
+      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+        e.preventDefault()
+        this.inventoryOpen = !this.inventoryOpen
+        this.rebuildInventory()
+      }
     })
 
     this.startSession()
@@ -158,7 +171,6 @@ export class Game {
     pg.beginFill(0xffffff); pg.drawCircle(0, 0, 2); pg.endFill()
     const projTex = r.generateTexture(pg); pg.destroy()
 
-    // Boss — large magenta circle with inner glow ring
     const bg2 = new Graphics()
     bg2.beginFill(0xcc0066, 0.22); bg2.drawCircle(0, 0, BOSS_RADIUS + 12); bg2.endFill()
     bg2.beginFill(0xaa0044);       bg2.drawCircle(0, 0, BOSS_RADIUS);       bg2.endFill()
@@ -166,8 +178,6 @@ export class Game {
     bg2.beginFill(0xff88ff, 0.75); bg2.drawCircle(0, 0, 8);                 bg2.endFill()
     const bossTex = r.generateTexture(bg2); bg2.destroy()
 
-    // EnemyFast (4) — diamond/spear shape for Dasher & Berserker
-    // White base so archetype tint drives the color
     const R = ENEMY_RADIUS
     const fg = new Graphics()
     fg.beginFill(0xffffff)
@@ -177,41 +187,45 @@ export class Game {
     fg.drawPolygon([0, -(R - 5), R - 7, 0, 0, R - 5, -(R - 7), 0])
     const fastTex = r.generateTexture(fg); fg.destroy()
 
-    // EnemyBrute (5) — heavy circle with thick border for Brute, Tank, Elite
     const brG = new Graphics()
     brG.beginFill(0xffffff, 0.25); brG.drawCircle(0, 0, R + 4); brG.endFill()
     brG.beginFill(0xffffff);       brG.drawCircle(0, 0, R);      brG.endFill()
     brG.lineStyle(3, 0xdddddd, 0.85); brG.drawCircle(0, 0, R - 5)
     const bruteTex = r.generateTexture(brG); brG.destroy()
 
-    // EnemySwarm (6) — tiny plain dot for Swarm & Splitter fragments
     const swG = new Graphics()
     swG.beginFill(0xffffff); swG.drawCircle(0, 0, 7); swG.endFill()
     const swarmTex = r.generateTexture(swG); swG.destroy()
 
-    // EnemyShadow (7) — hollow ghost ring for Shadow & Void
     const shG = new Graphics()
     shG.beginFill(0xffffff, 0.12); shG.drawCircle(0, 0, R + 2); shG.endFill()
     shG.lineStyle(2.5, 0xffffff, 0.95); shG.drawCircle(0, 0, R)
     shG.lineStyle(1,   0xffffff, 0.35); shG.drawCircle(0, 0, R - 6)
     const shadowTex = r.generateTexture(shG); shG.destroy()
 
-    // Bomb (8) — pulsing orange charge indicator for DELAYED_EXPLOSION
     const bmG = new Graphics()
     bmG.beginFill(0xffffff, 0.3); bmG.drawCircle(0, 0, 14); bmG.endFill()
     bmG.beginFill(0xffffff);      bmG.drawCircle(0, 0,  8); bmG.endFill()
     bmG.lineStyle(1.5, 0xffffff, 0.9); bmG.drawCircle(0, 0, 12)
     const bombTex = r.generateTexture(bmG); bmG.destroy()
 
-    // Blackhole (9) — dark ring for EVENT HORIZON gravity well
     const bhG = new Graphics()
     bhG.beginFill(0x110022, 0.85); bhG.drawCircle(0, 0, 22); bhG.endFill()
     bhG.lineStyle(2, 0xffffff, 0.7); bhG.drawCircle(0, 0, 20)
     bhG.lineStyle(1, 0xffffff, 0.25); bhG.drawCircle(0, 0, 13)
     const blackholeTex = r.generateTexture(bhG); bhG.destroy()
 
+    // Gem (TextureId.Gem = 10) — small cyan-green diamond
+    const gmG = new Graphics()
+    gmG.beginFill(0x00ffaa, 0.9)
+    gmG.drawPolygon([0, -7, 5, 0, 0, 7, -5, 0])
+    gmG.endFill()
+    gmG.lineStyle(1, 0xffffff, 0.7)
+    gmG.drawPolygon([0, -5, 3, 0, 0, 5, -3, 0])
+    const gemTex = r.generateTexture(gmG); gmG.destroy()
+
     return [nexusTex, enemyTex, projTex, bossTex, fastTex, bruteTex, swarmTex, shadowTex,
-            bombTex, blackholeTex]
+            bombTex, blackholeTex, gemTex]
   }
 
   // ---------------------------------------------------------------------------
@@ -219,49 +233,100 @@ export class Game {
   // ---------------------------------------------------------------------------
 
   private buildScene(): void {
-    const bg = new Graphics()
-    bg.beginFill(0x05050f); bg.drawRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT); bg.endFill()
-    bg.lineStyle(1, 0x101040, 0.5)
-    for (let x = 0; x <= CANVAS_WIDTH; x += 64) { bg.moveTo(x, 0); bg.lineTo(x, CANVAS_HEIGHT) }
-    for (let y = 0; y <= CANVAS_HEIGHT; y += 64) { bg.moveTo(0, y); bg.lineTo(CANVAS_WIDTH, y) }
-    this.app.stage.addChild(bg)
-
+    // World-space game container (scrolls with camera)
     this.gameContainer = new Container()
     this.app.stage.addChild(this.gameContainer)
 
+    // Tiling background grid inside the game container (world-space)
+    this.bgGraphics = new Graphics()
+    this.gameContainer.addChildAt(this.bgGraphics, 0)
+
     this.buildHUD()
+  }
+
+  /** Redraws the tiling grid centred on the Nexus position */
+  private updateBackground(nx: number, ny: number): void {
+    const g = this.bgGraphics
+    g.clear()
+
+    // Snap origin to nearest tile multiple so the grid appears infinite
+    const originX = Math.floor(nx / GRID_TILE) * GRID_TILE
+    const originY = Math.floor(ny / GRID_TILE) * GRID_TILE
+
+    const startX = originX - GRID_HALF_TILES_X * GRID_TILE
+    const startY = originY - GRID_HALF_TILES_Y * GRID_TILE
+    const endX   = originX + GRID_HALF_TILES_X * GRID_TILE
+    const endY   = originY + GRID_HALF_TILES_Y * GRID_TILE
+
+    g.beginFill(0x05050f)
+    g.drawRect(startX, startY, endX - startX, endY - startY)
+    g.endFill()
+
+    g.lineStyle(1, 0x101040, 0.5)
+    for (let x = startX; x <= endX; x += GRID_TILE) {
+      g.moveTo(x, startY); g.lineTo(x, endY)
+    }
+    for (let y = startY; y <= endY; y += GRID_TILE) {
+      g.moveTo(startX, y); g.lineTo(endX, y)
+    }
   }
 
   private buildHUD(): void {
     const ui = new Container()
     this.app.stage.addChild(ui)
 
-    // HP bar background
+    // ── HP bar (top centre) ──────────────────────────────────────────────
     const hpBg = new Graphics()
     hpBg.beginFill(0x222222)
-    hpBg.drawRoundedRect(CANVAS_WIDTH / 2 - 110, 16, 220, 16, 8)
+    hpBg.drawRoundedRect(CANVAS_WIDTH / 2 - 110, 14, 220, 14, 7)
     hpBg.endFill()
     ui.addChild(hpBg)
 
     this.hpBarFill = new Graphics()
     ui.addChild(this.hpBarFill)
 
+    // ── XP bar (directly below HP bar) ──────────────────────────────────
+    this.xpBarBg = new Graphics()
+    this.xpBarBg.beginFill(0x111133)
+    this.xpBarBg.drawRoundedRect(CANVAS_WIDTH / 2 - 110, 32, 220, 8, 4)
+    this.xpBarBg.endFill()
+    ui.addChild(this.xpBarBg)
+
+    this.xpBarFill = new Graphics()
+    ui.addChild(this.xpBarFill)
+
+    // ── Wave text (top left) ─────────────────────────────────────────────
     this.waveText = new Text('Prepare…', new TextStyle({
       fill: '#88bbff', fontSize: 20, fontFamily: 'monospace', fontWeight: 'bold',
     }))
-    this.waveText.x = 20; this.waveText.y = 16
+    this.waveText.x = 20; this.waveText.y = 14
     ui.addChild(this.waveText)
 
+    // ── Score text (top right) ───────────────────────────────────────────
     this.scoreText = new Text('Score: 0', new TextStyle({
       fill: '#ffee44', fontSize: 20, fontFamily: 'monospace', fontWeight: 'bold',
     }))
-    this.scoreText.x = CANVAS_WIDTH - 200; this.scoreText.y = 16
+    this.scoreText.x = CANVAS_WIDTH - 200; this.scoreText.y = 14
     ui.addChild(this.scoreText)
 
-    // Context event badge (shown only when an active event is detected)
+    // ── Level badge (below XP bar, centred) ─────────────────────────────
+    this.levelText = new Text('Lv.1', new TextStyle({
+      fill: '#00ffaa', fontSize: 13, fontFamily: 'monospace', fontWeight: 'bold',
+    }))
+    this.levelText.anchor.set(0.5, 0)
+    this.levelText.x = CANVAS_WIDTH / 2; this.levelText.y = 43
+    ui.addChild(this.levelText)
+
+    // ── Inventory panel (left side, below wave text) ─────────────────────
+    this.inventoryPanel = new Container()
+    this.inventoryPanel.x = 10
+    this.inventoryPanel.y = 44
+    this.app.stage.addChild(this.inventoryPanel)
+
+    // Context event badge
     this.contextBadge = null
 
-    // Game-over overlay
+    // ── Game-over overlay ────────────────────────────────────────────────
     this.gameOverContainer = new Container()
     this.gameOverContainer.visible = false
     this.app.stage.addChild(this.gameOverContainer)
@@ -295,10 +360,115 @@ export class Game {
     treeHint.anchor.set(0.5); treeHint.x = CANVAS_WIDTH / 2; treeHint.y = CANVAS_HEIGHT / 2 + 100
     this.gameOverContainer.addChild(treeHint)
 
-    // Restart on click (only if tree is NOT open)
     ;(this.app.view as HTMLCanvasElement).addEventListener('click', () => {
       if (this.world?.gameOver && !this.treeUI?.isOpen) this.restart()
     })
+  }
+
+  // ---------------------------------------------------------------------------
+  // Inventory panel — left-side list of acquired peripherals & catalysts
+  // ---------------------------------------------------------------------------
+
+  private rebuildInventory(): void {
+    this.inventoryPanel.removeChildren()
+
+    const all    = [...(this.world?.peripherals ?? []), ...(this.world?.catalysts ?? [])]
+    const meta   = new Map(ITEMS.map(it => [it.id, it]))
+    const counts = new Map<string, number>()
+    for (const id of all) counts.set(id, (counts.get(id) ?? 0) + 1)
+
+    const PAD    = 6
+    const panelW = 178
+    const HEADER_H = 22
+
+    // ── Header tab — always visible ──────────────────────────────────────
+    const arrow     = this.inventoryOpen ? '▼' : '▶'
+    const itemCount = all.length
+    const headerBg  = new Graphics()
+    headerBg.beginFill(0x060c1a, 0.85)
+    headerBg.lineStyle(1, 0x2244aa, 0.9)
+    headerBg.drawRoundedRect(0, 0, panelW, HEADER_H, 5)
+    headerBg.endFill()
+    headerBg.interactive = true
+    headerBg.cursor = 'pointer'
+    headerBg.on('pointertap', () => {
+      this.inventoryOpen = !this.inventoryOpen
+      this.rebuildInventory()
+    })
+    this.inventoryPanel.addChild(headerBg)
+
+    const headerLabel = itemCount > 0
+      ? `${arrow} ITEMS  (${itemCount})  [Shift]`
+      : `${arrow} ITEMS  [Shift]`
+    const headerTxt = new Text(headerLabel, new TextStyle({
+      fill: '#7799cc', fontSize: 12, fontFamily: 'monospace', fontWeight: 'bold',
+    }))
+    headerTxt.x = PAD; headerTxt.y = (HEADER_H - 12) / 2
+    this.inventoryPanel.addChild(headerTxt)
+
+    if (!this.inventoryOpen || counts.size === 0) {
+      // Collapsed or no items — optionally show empty hint
+      if (this.inventoryOpen && counts.size === 0) {
+        const emptyBg = new Graphics()
+        emptyBg.beginFill(0x060c1a, 0.75)
+        emptyBg.lineStyle(1, 0x223355, 0.6)
+        emptyBg.drawRoundedRect(0, HEADER_H + 2, panelW, 24, 5)
+        emptyBg.endFill()
+        this.inventoryPanel.addChild(emptyBg)
+
+        const emptyTxt = new Text('  No items yet', new TextStyle({
+          fill: '#445566', fontSize: 11, fontFamily: 'monospace',
+        }))
+        emptyTxt.x = PAD; emptyTxt.y = HEADER_H + 2 + 5
+        this.inventoryPanel.addChild(emptyTxt)
+      }
+      return
+    }
+
+    // ── Expanded item list ────────────────────────────────────────────────
+    const ROW_H  = 22
+    const DOT    = 8
+    const listH  = counts.size * ROW_H + PAD * 2
+
+    const listBg = new Graphics()
+    listBg.beginFill(0x060c1a, 0.80)
+    listBg.lineStyle(1, 0x223355, 0.7)
+    listBg.drawRoundedRect(0, HEADER_H + 2, panelW, listH, 5)
+    listBg.endFill()
+    this.inventoryPanel.addChild(listBg)
+
+    let row = 0
+    for (const [id, count] of counts) {
+      const item  = meta.get(id)
+      const color = item?.color    ?? 0xaaaaaa
+      const name  = item?.name     ?? id
+      const cat   = item?.category ?? 'catalyst'
+
+      const y = HEADER_H + 2 + PAD + row * ROW_H
+
+      // Dot: diamond = peripheral, circle = catalyst
+      const dot = new Graphics()
+      dot.beginFill(color, 0.9)
+      if (cat === 'peripheral') {
+        dot.drawPolygon([DOT / 2, 0, DOT, DOT / 2, DOT / 2, DOT, 0, DOT / 2])
+      } else {
+        dot.drawCircle(DOT / 2, DOT / 2, DOT / 2)
+      }
+      dot.endFill()
+      dot.x = PAD
+      dot.y = y + (ROW_H - DOT) / 2
+      this.inventoryPanel.addChild(dot)
+
+      const label = count > 1 ? `${name}  ×${count}` : name
+      const txt   = new Text(label, new TextStyle({
+        fill: '#bbccdd', fontSize: 11, fontFamily: 'monospace',
+      }))
+      txt.x = PAD + DOT + 5
+      txt.y = y + (ROW_H - 12) / 2
+      this.inventoryPanel.addChild(txt)
+
+      row++
+    }
   }
 
   private buildTreeButton(): void {
@@ -335,7 +505,6 @@ export class Game {
   // ---------------------------------------------------------------------------
 
   private refreshContextBadge(label: string, color: string): void {
-    // Remove old badge if any
     if (this.contextBadge) {
       this.contextBadge.parent?.removeChild(this.contextBadge)
       this.contextBadge.destroy()
@@ -349,8 +518,7 @@ export class Game {
     }))
     badge.anchor.set(0.5, 0)
     badge.x = CANVAS_WIDTH / 2
-    badge.y = 40
-    // Add to stage directly so it sits above gameContainer
+    badge.y = 58
     this.app.stage.addChild(badge)
     this.contextBadge = badge
   }
@@ -364,12 +532,10 @@ export class Game {
     this.renderSystem = new RenderSystem(this.textures, this.gameContainer)
     this.nexusPulseTimer = 0
 
-    // Show/hide context badge based on detected event
     this.refreshContextBadge(this.world.context.eventLabel, this.world.context.eventColor)
 
     this.createNexus()
 
-    // Apply any existing skill-tree stats (tree persists across restarts)
     const stats = SkillTreeStore.computedStats
     this.world.stats = stats
     applyStatsToNexus(this.world, stats)
@@ -380,9 +546,11 @@ export class Game {
     )
     resetSpawner()
 
-    this.waveText.text = 'Prepare…'
-    this.scoreText.text = 'Score: 0'
+    this.waveText.text   = 'Prepare…'
+    this.scoreText.text  = 'Score: 0'
+    this.levelText.text  = 'Lv.1'
     this.gameOverContainer.visible = false
+    this.rebuildInventory()
   }
 
   private createNexus(): void {
@@ -392,6 +560,11 @@ export class Game {
     addComponent(this.world, Position, eid)
     Position.x[eid] = NEXUS_X
     Position.y[eid] = NEXUS_Y
+
+    // Nexus now has Velocity so MovementSystem can drive it
+    addComponent(this.world, Velocity, eid)
+    Velocity.x[eid] = 0
+    Velocity.y[eid] = 0
 
     addComponent(this.world, Health, eid)
     Health.current[eid] = NEXUS_MAX_HP
@@ -422,7 +595,6 @@ export class Game {
     const weekendTag = weekendBonus ? ' +WKD' : ''
     this.waveText.text = `Wave ${wave} — Clear!  (+${bonus} SP${weekendTag})`
 
-    // Restore 25% of max HP on each wave clear
     const neid = this.world.nexusEid
     if (neid >= 0) {
       const heal = Health.max[neid] * 0.25
@@ -432,7 +604,6 @@ export class Game {
 
   private toggleTree(): void {
     this.treeUI?.toggle()
-    // world.paused is synced from treeUI.isOpen every frame in update()
   }
 
   private restart(): void {
@@ -448,24 +619,18 @@ export class Game {
   private update(_delta: number): void {
     const dt = this.app.ticker.deltaMS / 1000
 
-    // Sync world.paused from treeUI every frame — this is the single source of
-    // truth and handles ALL close paths (Tab key, [X] button, etc.)
     const treeNowOpen = this.treeUI?.isOpen ?? false
     const justClosed  = this.treePrevOpen && !treeNowOpen
-    this.world.paused  = treeNowOpen
+    this.world.paused  = treeNowOpen || this.world.levelUpPause
     this.treePrevOpen  = treeNowOpen
 
-    // Re-apply skill tree stats the frame the tree closes
     if (justClosed) {
       const stats = SkillTreeStore.computedStats
       this.world.stats = stats
       applyStatsToNexus(this.world, stats)
     }
 
-    // Tree animation runs always (even paused)
     this.treeUI?.animate(dt)
-
-    // Streamer feed animation runs always
     this.streamerUI?.animate(dt)
 
     if (this.world.gameOver) {
@@ -475,12 +640,25 @@ export class Game {
       return
     }
 
+    // Level-up card screen: game paused, show overlay if not already visible
+    if (this.world.pendingLevelUp && !this.world.levelUpPause) {
+      this.world.pendingLevelUp = false
+      this.world.levelUpPause   = true
+      this.world.paused         = true
+      this.levelUpUI.show(this.world, () => {
+        this.world.levelUpPause = false
+        this.world.paused       = this.treeUI?.isOpen ?? false
+        this.levelText.text = `Lv.${this.world.level}`
+        this.rebuildInventory()
+      })
+    }
+
     if (this.world.paused) return
 
     this.world.delta   = dt
     this.world.elapsed += dt
 
-    // ---- Buff timer tick ----
+    // ── Buff timer tick ────────────────────────────────────────────────
     const buffs = this.world.buffs
     if (buffs.fireRateTimer > 0) {
       buffs.fireRateTimer = Math.max(0, buffs.fireRateTimer - dt)
@@ -491,7 +669,6 @@ export class Game {
       if (buffs.enemySpeedTimer === 0) buffs.enemySpeedMult = 1
     }
 
-    // One-shot heal request
     if (buffs.healRequest) {
       buffs.healRequest = false
       const neid = this.world.nexusEid
@@ -503,31 +680,40 @@ export class Game {
       }
     }
 
-    // Systems — order matters
+    // ── ECS Systems ────────────────────────────────────────────────────
     enemyAISystem(this.world)
     weaponSystem(this.world)
-    movementSystem(this.world)
+    movementSystem(this.world, this.input)
     auraSystem(this.world)
     collisionSystem(this.world)
     bombSystem(this.world)
     blackholeSystem(this.world)
     lifetimeSystem(this.world)
+    gemSystem(this.world)
 
     const aliveEnemies = enemyQuery(this.world).length
     spawnerSystem(this.world, aliveEnemies)
+
+    // ── Camera follow ──────────────────────────────────────────────────
+    const neid = this.world.nexusEid
+    const nx   = Position.x[neid]
+    const ny   = Position.y[neid]
+    this.gameContainer.x = CANVAS_WIDTH  / 2 - nx
+    this.gameContainer.y = CANVAS_HEIGHT / 2 - ny
+    this.updateBackground(nx, ny)
 
     this.renderSystem.update(this.world)
 
     // Nexus pulse animation
     this.nexusPulseTimer += dt
-    Renderable.scale[this.world.nexusEid] = 1 + Math.sin(this.nexusPulseTimer * 3.0) * 0.05
+    Renderable.scale[neid] = 1 + Math.sin(this.nexusPulseTimer * 3.0) * 0.05
 
     // Passive HP regen: 3 HP/s
-    const neid = this.world.nexusEid
     Health.current[neid] = Math.min(Health.max[neid], Health.current[neid] + 3 * dt)
 
-    // HUD
+    // ── HUD refresh ────────────────────────────────────────────────────
     this.refreshHpBar()
+    this.refreshXpBar()
     this.scoreText.text = `Score: ${this.world.score}`
   }
 
@@ -536,12 +722,28 @@ export class Game {
     const ratio = Math.max(0, Health.current[neid] / Health.max[neid])
     const barW  = 220
     const barX  = CANVAS_WIDTH / 2 - 110
-    const barY  = 16
+    const barY  = 14
     const color = ratio > 0.5 ? 0x44ff88 : ratio > 0.25 ? 0xffaa22 : 0xff3333
 
     this.hpBarFill.clear()
     this.hpBarFill.beginFill(color)
-    this.hpBarFill.drawRoundedRect(barX, barY, barW * ratio, 16, 8)
+    this.hpBarFill.drawRoundedRect(barX, barY, barW * ratio, 14, 7)
     this.hpBarFill.endFill()
+  }
+
+  private refreshXpBar(): void {
+    const ratio = this.world.xpToNextLevel > 0
+      ? Math.min(1, this.world.xp / this.world.xpToNextLevel)
+      : 0
+    const barW = 220
+    const barX = CANVAS_WIDTH / 2 - 110
+    const barY = 32
+
+    this.xpBarFill.clear()
+    if (ratio > 0) {
+      this.xpBarFill.beginFill(0x0055ff)
+      this.xpBarFill.drawRoundedRect(barX, barY, barW * ratio, 8, 4)
+      this.xpBarFill.endFill()
+    }
   }
 }

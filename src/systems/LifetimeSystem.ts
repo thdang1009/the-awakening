@@ -1,5 +1,5 @@
-import { addComponent, addEntity, defineQuery, removeEntity } from 'bitecs'
-import { Projectile, Position, Blackhole, Renderable } from '../ecs/components'
+import { addComponent, addEntity, defineQuery, hasComponent, removeEntity } from 'bitecs'
+import { Projectile, Position, Blackhole, Renderable, Boomerang } from '../ecs/components'
 import { GameWorld } from '../ecs/world'
 import { TextureId } from '../constants'
 
@@ -17,12 +17,23 @@ export function lifetimeSystem(world: GameWorld): void {
     Projectile.elapsed[eid] += dt
     if (Projectile.elapsed[eid] < Projectile.lifetime[eid]) continue
 
-    // ── EVENT HORIZON: leave a gravity well at the projectile's final position ──
+    // ── EVENT HORIZON: leave a gravity well at the correct spawn location ──
     if (spawnBH) {
       const bid = addEntity(world)
       addComponent(world, Position, bid)
-      Position.x[bid] = Position.x[eid]
-      Position.y[bid] = Position.y[eid]
+
+      // Bug fix: for BOOMERANG projectiles, use the recorded apex position
+      // (where the projectile turned around) rather than the expiry position
+      // (which would be back near the Nexus).
+      const isBoomerang = hasComponent(world, Boomerang, eid)
+      if (isBoomerang && Projectile.apexSet[eid] === 1) {
+        Position.x[bid] = Projectile.apexX[eid]
+        Position.y[bid] = Projectile.apexY[eid]
+      } else {
+        Position.x[bid] = Position.x[eid]
+        Position.y[bid] = Position.y[eid]
+      }
+
       addComponent(world, Blackhole, bid)
       Blackhole.timer[bid]  = 2.5
       Blackhole.radius[bid] = 190

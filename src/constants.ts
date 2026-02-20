@@ -8,6 +8,19 @@ export const NEXUS_Y = CANVAS_HEIGHT / 2
 export const NEXUS_RADIUS = 30
 export const NEXUS_MAX_HP = 100
 
+// Nexus movement (Phase 2)
+export const NEXUS_MOVE_SPEED   = 220   // max px/s
+export const NEXUS_ACCELERATION = 900   // px/s² ramp-up
+export const NEXUS_FRICTION     = 8     // exponential damping factor (v *= exp(-f*dt))
+
+// Pickup / Gem economy (Phase 2)
+export const BASE_PICKUP_RADIUS  = 90    // px — magnet activation range
+export const GEM_ATTRACT_SPEED   = 280   // px/s — gem moves toward nexus when magnetised
+export const GEM_XP_VALUE        = 5     // XP per gem collected
+export const GEM_RADIUS          = 5     // collision radius for collection
+export const XP_BASE             = 50    // XP needed for level 1→2
+export const XP_SCALE            = 25    // +25 XP per subsequent level
+
 // Enemies
 export const ENEMY_RADIUS = 14
 export const ENEMY_BASE_SPEED = 80   // px/s at wave 1
@@ -64,4 +77,5 @@ export enum TextureId {
   EnemyShadow = 7,   // hollow ring — Shadow, Void
   Bomb        = 8,   // pulsing charge indicator — DELAYED_EXPLOSION
   Blackhole   = 9,   // dark gravity well — SPAWN_BLACKHOLE
+  Gem         = 10,  // experience gem dropped by enemies
 }

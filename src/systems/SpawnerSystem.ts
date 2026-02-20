@@ -53,20 +53,30 @@ function enemySpeedForWave(wave: number): number {
   return ENEMY_BASE_SPEED + (wave - 1) * WAVE_SPEED_SCALING
 }
 
-/** Spawn a random offscreen position on one of the 4 edges */
-function randomOffscreenPos(): { x: number; y: number } {
+/**
+ * Spawn position just outside the player's visible viewport.
+ * Uses Nexus world-space position as the camera centre so enemies always
+ * appear at the screen edges regardless of how far the Nexus has moved.
+ */
+function randomOffscreenPos(world: GameWorld): { x: number; y: number } {
+  const cx = world.nexusEid >= 0 ? Position.x[world.nexusEid] : CANVAS_WIDTH  / 2
+  const cy = world.nexusEid >= 0 ? Position.y[world.nexusEid] : CANVAS_HEIGHT / 2
+
+  const hw = CANVAS_WIDTH  / 2 + SPAWN_MARGIN
+  const hh = CANVAS_HEIGHT / 2 + SPAWN_MARGIN
+
   const side = Math.floor(Math.random() * 4)
   switch (side) {
-    case 0: return { x: Math.random() * CANVAS_WIDTH, y: -SPAWN_MARGIN }
-    case 1: return { x: CANVAS_WIDTH + SPAWN_MARGIN, y: Math.random() * CANVAS_HEIGHT }
-    case 2: return { x: Math.random() * CANVAS_WIDTH, y: CANVAS_HEIGHT + SPAWN_MARGIN }
-    default: return { x: -SPAWN_MARGIN, y: Math.random() * CANVAS_HEIGHT }
+    case 0: return { x: cx + (Math.random() * 2 - 1) * hw, y: cy - hh }  // top
+    case 1: return { x: cx + hw,                            y: cy + (Math.random() * 2 - 1) * hh }  // right
+    case 2: return { x: cx + (Math.random() * 2 - 1) * hw, y: cy + hh }  // bottom
+    default:return { x: cx - hw,                            y: cy + (Math.random() * 2 - 1) * hh }  // left
   }
 }
 
 function spawnBoss(world: GameWorld): void {
   const eid = addEntity(world)
-  const { x, y } = randomOffscreenPos()
+  const { x, y } = randomOffscreenPos(world)
 
   addComponent(world, Position, eid)
   Position.x[eid] = x
@@ -100,7 +110,7 @@ function spawnBoss(world: GameWorld): void {
 function spawnEnemyEntity(world: GameWorld, archetype: EnemyArchetype): void {
   const eid  = addEntity(world)
   const wave = world.wave
-  const { x, y } = randomOffscreenPos()
+  const { x, y } = randomOffscreenPos(world)
 
   addComponent(world, Position, eid)
   Position.x[eid] = x

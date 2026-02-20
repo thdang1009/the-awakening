@@ -52,6 +52,7 @@ export function auraSystem(world: GameWorld): void {
     Health.current[eid] -= auraDmg
     if (Health.current[eid] <= 0) {
       world.score += spk
+      world.pendingGems.push({ x: Position.x[eid], y: Position.y[eid] })
       if (Enemy.splitsOnDeath[eid] === 1) {
         world.pendingSplits.push({ x: Position.x[eid], y: Position.y[eid] })
       }

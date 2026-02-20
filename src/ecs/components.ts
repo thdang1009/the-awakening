@@ -41,9 +41,19 @@ export const Enemy = defineComponent({
 
 /** Projectile lifetime tracking */
 export const Projectile = defineComponent({
-  damage: Types.f32,
-  elapsed: Types.f32,    // seconds alive
-  lifetime: Types.f32,   // max seconds
+  damage:   Types.f32,
+  elapsed:  Types.f32,    // seconds alive
+  lifetime: Types.f32,    // max seconds
+  // Event Horizon apex fix: recorded by MovementSystem when a BOOMERANG turns around
+  apexX:    Types.f32,
+  apexY:    Types.f32,
+  apexSet:  Types.ui8,    // 1 once apex position has been recorded
+})
+
+/** Experience Gem — dropped by enemies, collected by proximity to Nexus */
+export const ExperienceGem = defineComponent({
+  value:      Types.f32,   // XP granted on collection
+  attracting: Types.ui8,   // 1 when within pickup radius (magnetised toward nexus)
 })
 
 /** Tag: this entity is the Nexus (player) */

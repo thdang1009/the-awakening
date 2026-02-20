@@ -51,6 +51,28 @@ export type GameWorld = ReturnType<typeof createWorld> & {
   beamAngle: number
   /** Countdown until next AURA_DAMAGE pulse (seconds) */
   auraTimer: number
+
+  // ── Phase 2: Economy & XP ──────────────────────────────────────────────
+  /** Current experience points accumulated this level */
+  xp: number
+  /** XP required to trigger the next level-up */
+  xpToNextLevel: number
+  /** Current player level (starts at 1) */
+  level: number
+  /** Pickup radius (px) — can be boosted by Scrap Magnet chassis / catalysts */
+  pickupRadius: number
+  /** Nexus move speed multiplier — can be boosted by level-up items */
+  moveSpeedMult: number
+  /** Consume-once: triggers the Level-Up drafting pause */
+  pendingLevelUp: boolean
+  /** True while the level-up card selection overlay is visible */
+  levelUpPause: boolean
+  /** Inventory: IDs of acquired peripheral weapons */
+  peripherals: string[]
+  /** Inventory: IDs of acquired passive catalysts */
+  catalysts: string[]
+  /** Pending gem spawns (written by CollisionSystem/AuraSystem, consumed by GemSystem) */
+  pendingGems: Array<{ x: number; y: number }>
 }
 
 export function createGameWorld(): GameWorld {
@@ -77,5 +99,18 @@ export function createGameWorld(): GameWorld {
   world.thermalHeat   = 0
   world.beamAngle     = 0
   world.auraTimer     = 0
+
+  // Phase 2
+  world.xp              = 0
+  world.xpToNextLevel   = 50   // matches XP_BASE constant
+  world.level           = 1
+  world.pickupRadius    = 90   // matches BASE_PICKUP_RADIUS constant
+  world.moveSpeedMult   = 1.0
+  world.pendingLevelUp  = false
+  world.levelUpPause    = false
+  world.peripherals     = []
+  world.catalysts       = []
+  world.pendingGems     = []
+
   return world
 }

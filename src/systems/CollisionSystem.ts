@@ -79,6 +79,7 @@ export function collisionSystem(world: GameWorld): void {
       if (Health.current[eeid] <= 0) {
         deadEnemies.add(eeid)
         world.score += spk
+        world.pendingGems.push({ x: Position.x[eeid], y: Position.y[eeid] })
 
         if (stats.behaviors.has('CHAIN_LIGHTNING')) {
           chainSources.push({ x: Position.x[eeid], y: Position.y[eeid], dmg: pdmg * 0.55 })
@@ -125,6 +126,7 @@ export function collisionSystem(world: GameWorld): void {
         if (Health.current[ceid] <= 0) {
           deadEnemies.add(ceid)
           world.score += spk
+          world.pendingGems.push({ x: Position.x[ceid], y: Position.y[ceid] })
           if (Enemy.splitsOnDeath[ceid] === 1) {
             world.pendingSplits.push({ x: Position.x[ceid], y: Position.y[ceid] })
           }
@@ -145,6 +147,7 @@ export function collisionSystem(world: GameWorld): void {
         if (Health.current[ceid] <= 0) {
           deadEnemies.add(ceid)
           world.score += spk
+          world.pendingGems.push({ x: Position.x[ceid], y: Position.y[ceid] })
           if (Enemy.splitsOnDeath[ceid] === 1) {
             world.pendingSplits.push({ x: Position.x[ceid], y: Position.y[ceid] })
           }

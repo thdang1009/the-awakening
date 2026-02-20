@@ -144,11 +144,31 @@ export function weaponSystem(world: GameWorld): void {
 
   Weapon.lastFire[neid] = now
 
-  // ── BEAM_MODE + SWEEPING: rotating beam arc, no target lock ──────────────
+  // ── BEAM_MODE: auto-aim sweeps toward nearest / highest-HP enemy ─────────
   if (stats.behaviors.has('BEAM_MODE')) {
-    if (enemyPositionQuery(world).length === 0) return
-    world.beamAngle += (2.2 * dt)   // ~126°/s sweep
-    const sweepDeg  = world.beamAngle * (180 / Math.PI)
+    const beamEnemies = enemyPositionQuery(world)
+    if (beamEnemies.length === 0) return
+
+    // Select beam target: SMART_TARGETING → highest HP, else nearest
+    const beamTarget = stats.behaviors.has('SMART_TARGETING')
+      ? findHighestHPEnemy(world, nx, ny, range * 2)
+      : findNearestEnemy(world, nx, ny, range * 2)   // wider range for beam
+
+    if (beamTarget >= 0) {
+      const tx = Position.x[beamTarget] - nx
+      const ty = Position.y[beamTarget] - ny
+      const targetAngle = Math.atan2(ty, tx)
+
+      // Smooth rotation toward target
+      let diff = targetAngle - world.beamAngle
+      while (diff >  Math.PI) diff -= 2 * Math.PI
+      while (diff < -Math.PI) diff += 2 * Math.PI
+
+      const BEAM_TURN_RATE = Math.PI * 2.5   // 450°/s — responsive but smooth
+      world.beamAngle += Math.max(-BEAM_TURN_RATE * dt, Math.min(BEAM_TURN_RATE * dt, diff))
+    }
+
+    const sweepDeg   = world.beamAngle * (180 / Math.PI)
     const totalShots = Math.max(1, 1 + Math.floor(stats.multishotAdd))
     for (let i = 0; i < totalShots; i++) {
       const offset = (i - (totalShots - 1) / 2) * 7
