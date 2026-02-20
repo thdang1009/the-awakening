@@ -8,6 +8,7 @@ import {
 } from 'pixi.js'
 import type { SkillNode } from './types'
 import { SkillTreeStore } from './SkillTreeStore'
+import { encodeBuild, decodeBuild } from '../buildcode/BuildCode'
 import { CANVAS_WIDTH, CANVAS_HEIGHT } from '../constants'
 
 // Branch colour palette
@@ -22,9 +23,10 @@ const BRANCH_COLOR: Record<string, number> = {
   junction:     0x44ffaa,
 }
 
-const COLOR_ACTIVE    = 0xffffff   // white ring for active nodes
-const COLOR_AVAILABLE = 0xffee44   // yellow ring for purchasable
-const COLOR_LOCKED    = 0x444466   // muted grey for locked
+const COLOR_ACTIVE      = 0xffffff   // white ring  — active
+const COLOR_AVAILABLE   = 0xffee44   // yellow ring — adjacent + affordable
+const COLOR_REACHABLE   = 0xff9922   // orange ring — adjacent but too expensive
+const COLOR_LOCKED      = 0x444466   // muted grey  — no adjacent active node
 
 // Node visual radii by tier
 const TIER_RADIUS: Record<string, number> = {
@@ -133,6 +135,12 @@ export class SkillTreeUI {
     header.addChild(closeText)
 
     // -----------------------------------------------------------------------
+    // Build Code panel (bottom-right, next to legend)
+    // -----------------------------------------------------------------------
+    const codePanel = this.buildCodePanel()
+    this.overlay.addChild(codePanel)
+
+    // -----------------------------------------------------------------------
     // Legend (bottom-left)
     // -----------------------------------------------------------------------
     const legendY = CANVAS_HEIGHT - 120
@@ -200,12 +208,16 @@ export class SkillTreeUI {
   animate(dt: number): void {
     if (!this._isOpen) return
     this.pulseTimer += dt
-    // Pulse the available-node border alpha
-    const alpha = 0.5 + 0.5 * Math.sin(this.pulseTimer * 4)
+    const pulse = 0.5 + 0.5 * Math.sin(this.pulseTimer * 4)
     for (const node of SkillTreeStore.allNodes) {
+      const gfx = this.nodeGfxMap.get(node.id)
+      if (!gfx) continue
       if (SkillTreeStore.canActivate(node.id)) {
-        const gfx = this.nodeGfxMap.get(node.id)
-        if (gfx) gfx.alpha = 0.75 + alpha * 0.25
+        // Affordable: bright yellow pulse
+        gfx.alpha = 0.75 + pulse * 0.25
+      } else if (SkillTreeStore.isReachable(node.id)) {
+        // Reachable but unaffordable: slow dim orange pulse
+        gfx.alpha = 0.45 + pulse * 0.20
       }
     }
   }
@@ -297,10 +309,11 @@ export class SkillTreeUI {
 
   private drawNode(gfx: Graphics, node: SkillNode): void {
     gfx.clear()
-    const r      = TIER_RADIUS[node.tier] ?? 13
-    const color  = BRANCH_COLOR[node.branch] ?? 0xaaaaaa
-    const active = SkillTreeStore.isActive(node.id)
-    const avail  = SkillTreeStore.canActivate(node.id)
+    const r         = TIER_RADIUS[node.tier] ?? 13
+    const color     = BRANCH_COLOR[node.branch] ?? 0xaaaaaa
+    const active    = SkillTreeStore.isActive(node.id)
+    const avail     = SkillTreeStore.canActivate(node.id)
+    const reachable = SkillTreeStore.isReachable(node.id)   // adjacent but too expensive
 
     if (active) {
       // Glow halo (notable + keystone only)
@@ -309,24 +322,30 @@ export class SkillTreeUI {
         gfx.drawCircle(0, 0, r + 10)
         gfx.endFill()
       }
-      // Main fill
       gfx.beginFill(color, 1.0)
       gfx.drawCircle(0, 0, r)
       gfx.endFill()
-      // White ring
       gfx.lineStyle(2, COLOR_ACTIVE, 1)
       gfx.drawCircle(0, 0, r + 3)
 
     } else if (avail) {
-      // Purchasable — tinted fill, bright border
+      // Affordable — tinted fill, pulsing yellow border
       gfx.beginFill(color, 0.45)
       gfx.drawCircle(0, 0, r)
       gfx.endFill()
       gfx.lineStyle(2.5, COLOR_AVAILABLE, 0.9)
       gfx.drawCircle(0, 0, r + 2)
 
+    } else if (reachable) {
+      // Can see it but can't afford yet — dim fill, orange dashed-looking border
+      gfx.beginFill(color, 0.22)
+      gfx.drawCircle(0, 0, r)
+      gfx.endFill()
+      gfx.lineStyle(1.5, COLOR_REACHABLE, 0.75)
+      gfx.drawCircle(0, 0, r + 2)
+
     } else {
-      // Locked — dark grey
+      // Truly locked — dark grey, no path to here yet
       gfx.beginFill(COLOR_LOCKED, 0.6)
       gfx.drawCircle(0, 0, r)
       gfx.endFill()
@@ -343,29 +362,55 @@ export class SkillTreeUI {
   // Tooltip
   // ---------------------------------------------------------------------------
 
+  /** Break a string into lines no longer than maxChars, splitting at word boundaries */
+  private static wordWrap(text: string, maxChars: number): string[] {
+    const words = text.split(' ')
+    const result: string[] = []
+    let current = ''
+    for (const word of words) {
+      if (current.length === 0) {
+        current = word
+      } else if (current.length + 1 + word.length <= maxChars) {
+        current += ' ' + word
+      } else {
+        result.push(current)
+        current = word
+      }
+    }
+    if (current) result.push(current)
+    return result
+  }
+
   private showTooltip(node: SkillNode, nodeGfx: Graphics): void {
     const active = SkillTreeStore.isActive(node.id)
     const avail  = SkillTreeStore.canActivate(node.id)
 
-    // Build text lines
+    // Build text lines — description is word-wrapped at 34 chars
     const lines: string[] = [node.label]
-    lines.push(node.description)
+    for (const l of SkillTreeUI.wordWrap(node.description, 34)) lines.push(l)
     lines.push('')
     if (node.effects.length > 0) {
       for (const e of node.effects) {
         lines.push(SkillTreeStore.describeEffect(e.stat, e.value))
       }
     }
-    if (node.keystoneId) {
-      lines.push('(Keystone effect)')
+    if (node.behaviors && node.behaviors.length > 0) {
+      lines.push('')
+      lines.push('Grants:')
+      for (const b of node.behaviors) {
+        lines.push(`  [${b.replace(/_/g, ' ')}]`)
+      }
     }
     lines.push('')
     if (active) {
       lines.push('[ ALLOCATED ]')
     } else if (avail) {
       lines.push(`Cost: ${node.cost} SP  — Click to allocate`)
+    } else if (SkillTreeStore.isReachable(node.id)) {
+      const need = node.cost - SkillTreeStore.skillPoints
+      lines.push(`Cost: ${node.cost} SP  — need ${need} more SP`)
     } else {
-      lines.push(`Cost: ${node.cost} SP  — locked`)
+      lines.push(`Cost: ${node.cost} SP  — unlock a connected node first`)
     }
 
     // Clear and rebuild tooltip container
@@ -373,10 +418,17 @@ export class SkillTreeUI {
 
     const pad = 10
     const textObjs: Text[] = lines.map((line, i) => {
-      const isBold  = i === 0
-      const isTag   = line.startsWith('[') || line.startsWith('Cost:')
-      const isInfo  = line.startsWith('+') || line.startsWith('(')
-      const color   = isBold ? '#ffffff' : isTag ? '#ffee44' : isInfo ? '#aaffaa' : '#aaaacc'
+      const isBold     = i === 0
+      const isTag      = line.startsWith('[') || line.startsWith('Cost:')
+      const isBehavior = line.startsWith('  [')
+      const isGrants   = line === 'Grants:'
+      const isInfo     = line.startsWith('+') || line.startsWith('×') || line.startsWith('−')
+      const color = isBold     ? '#ffffff'
+                  : isBehavior ? '#ffaa44'
+                  : isGrants   ? '#cc8833'
+                  : isTag      ? '#ffee44'
+                  : isInfo     ? '#aaffaa'
+                  :              '#aaaacc'
       const t = new Text(line, new TextStyle({
         fill: color,
         fontSize: isBold ? 16 : 13,
@@ -438,20 +490,126 @@ export class SkillTreeUI {
   // Legend
   // ---------------------------------------------------------------------------
 
+  // ---------------------------------------------------------------------------
+  // Build Code panel (export / import)
+  // ---------------------------------------------------------------------------
+
+  private buildCodePanel(): Container {
+    const c = new Container()
+    c.x = CANVAS_WIDTH - 270
+    c.y = CANVAS_HEIGHT - 120
+
+    const bg = new Graphics()
+    bg.beginFill(0x0a0a1a, 0.85)
+    bg.drawRoundedRect(0, 0, 260, 110, 6)
+    bg.endFill()
+    c.addChild(bg)
+
+    const titleStyle = new TextStyle({ fill: '#888899', fontSize: 13, fontFamily: 'monospace', fontWeight: 'bold' })
+    const title = new Text('BUILD CODE', titleStyle)
+    title.x = 10; title.y = 8
+    c.addChild(title)
+
+    // Export button
+    const exportBg = new Graphics()
+    exportBg.beginFill(0x1a2244)
+    exportBg.lineStyle(1, 0x3355aa)
+    exportBg.drawRoundedRect(10, 30, 112, 28, 4)
+    exportBg.endFill()
+    exportBg.interactive = true
+    exportBg.cursor = 'pointer'
+    c.addChild(exportBg)
+
+    const exportLabel = new Text('EXPORT', new TextStyle({
+      fill: '#aaccff', fontSize: 13, fontFamily: 'monospace', fontWeight: 'bold',
+    }))
+    exportLabel.x = 10 + 56 - exportLabel.width / 2
+    exportLabel.y = 30 + 7
+    c.addChild(exportLabel)
+
+    exportBg.on('pointertap', () => {
+      const code = encodeBuild(SkillTreeStore.activeNodes)
+      navigator.clipboard.writeText(code).catch(() => {
+        window.prompt('Copy build code (Ctrl+C):', code)
+      })
+      exportLabel.text  = 'COPIED!'
+      exportLabel.style.fill = '#44ff88'
+      setTimeout(() => {
+        exportLabel.text = 'EXPORT'
+        exportLabel.style.fill = '#aaccff'
+      }, 1400)
+    })
+
+    // Import button
+    const importBg = new Graphics()
+    importBg.beginFill(0x1a2244)
+    importBg.lineStyle(1, 0x3355aa)
+    importBg.drawRoundedRect(138, 30, 112, 28, 4)
+    importBg.endFill()
+    importBg.interactive = true
+    importBg.cursor = 'pointer'
+    c.addChild(importBg)
+
+    const importLabel = new Text('IMPORT', new TextStyle({
+      fill: '#aaccff', fontSize: 13, fontFamily: 'monospace', fontWeight: 'bold',
+    }))
+    importLabel.x = 138 + 56 - importLabel.width / 2
+    importLabel.y = 30 + 7
+    c.addChild(importLabel)
+
+    importBg.on('pointertap', () => {
+      const input = window.prompt('Paste build code (NEXUS-...):')
+      if (!input) return
+      const nodes = decodeBuild(input)
+      if (!nodes) {
+        importLabel.text = 'INVALID!'
+        importLabel.style.fill = '#ff4444'
+        setTimeout(() => {
+          importLabel.text = 'IMPORT'
+          importLabel.style.fill = '#aaccff'
+        }, 1400)
+        return
+      }
+      SkillTreeStore.loadBuild(nodes)
+      importLabel.text = 'LOADED!'
+      importLabel.style.fill = '#44ff88'
+      setTimeout(() => {
+        importLabel.text = 'IMPORT'
+        importLabel.style.fill = '#aaccff'
+      }, 1400)
+    })
+
+    // Hint text
+    const hint = new Text('Share your build with friends', new TextStyle({
+      fill: '#445566', fontSize: 11, fontFamily: 'monospace',
+    }))
+    hint.x = 10; hint.y = 70
+    c.addChild(hint)
+
+    const hintSP = new Text('(import resets SP to 0)', new TextStyle({
+      fill: '#334455', fontSize: 11, fontFamily: 'monospace',
+    }))
+    hintSP.x = 10; hintSP.y = 86
+    c.addChild(hintSP)
+
+    return c
+  }
+
   private buildLegend(y: number): Container {
     const c = new Container()
     c.y = y
 
     const bg = new Graphics()
     bg.beginFill(0x0a0a1a, 0.85)
-    bg.drawRoundedRect(10, 0, 320, 110, 6)
+    bg.drawRoundedRect(10, 0, 320, 120, 6)
     bg.endFill()
     c.addChild(bg)
 
     const style = new TextStyle({ fill: '#888899', fontSize: 13, fontFamily: 'monospace' })
     const entries = [
       { color: 0xffffff,  label: 'Allocated' },
-      { color: 0xffee44,  label: 'Available (click to buy)' },
+      { color: 0xffee44,  label: 'Affordable (click to buy)' },
+      { color: 0xff9922,  label: 'Need more SP' },
       { color: 0x444466,  label: 'Locked' },
     ]
     entries.forEach(({ color, label }, i) => {
@@ -460,12 +618,12 @@ export class SkillTreeUI {
       dot.drawCircle(0, 0, 6)
       dot.endFill()
       dot.x = 26
-      dot.y = 18 + i * 28
+      dot.y = 18 + i * 22
       c.addChild(dot)
 
       const txt = new Text(label, style)
       txt.x = 38
-      txt.y = 10 + i * 28
+      txt.y = 10 + i * 22
       c.addChild(txt)
     })
 
@@ -481,12 +639,12 @@ export class SkillTreeUI {
       dot.drawCircle(0, 0, r)
       dot.endFill()
       dot.x = 180
-      dot.y = 18 + i * 28
+      dot.y = 18 + i * 22
       c.addChild(dot)
 
       const txt = new Text(label, style)
       txt.x = 196
-      txt.y = 10 + i * 28
+      txt.y = 10 + i * 22
       c.addChild(txt)
     })
 
@@ -494,7 +652,7 @@ export class SkillTreeUI {
       fill: '#555566', fontSize: 12, fontFamily: 'monospace',
     }))
     hint.x = 20
-    hint.y = 90
+    hint.y = 100
     c.addChild(hint)
 
     return c

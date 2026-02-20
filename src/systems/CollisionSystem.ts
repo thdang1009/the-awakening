@@ -23,12 +23,10 @@ export function collisionSystem(world: GameWorld): void {
   if (world.gameOver || world.paused) return
 
   const { stats } = world
-  // Score per kill: base 10 × scoreMultiplier × omniscient bonus
-  const scorePerKill = Math.floor(10 * (1 + stats.scoreBonus) * (stats.omniscient ? 2 : 1))
-  // Incoming damage multiplier (armor + indestructible core)
-  let damageMult = 1 - stats.armorFlat
-  if (stats.indestructibleCore) damageMult *= 0.75
-  damageMult = Math.max(0.1, damageMult)
+  // Score per kill: additive bonus pool × multiplicative product (scoreMultiplier handles OMNISCIENT)
+  const scorePerKill = Math.floor(10 * (1 + stats.scoreBonus) * stats.scoreMultiplier)
+  // Incoming damage: reduced by armor flat reduction × damageTakenMultiplier (handles INDESTRUCTIBLE CORE)
+  const damageMult = Math.max(0.1, (1 - stats.armorFlat) * stats.damageTakenMultiplier)
 
   // --- Rebuild spatial grid with all enemies ---
   grid.clear()
@@ -62,6 +60,10 @@ export function collisionSystem(world: GameWorld): void {
       if (Health.current[eeid] <= 0) {
         deadEnemies.add(eeid)
         world.score += scorePerKill
+        // Splitter: schedule 2 mini-enemy fragments at death position
+        if (Enemy.splitsOnDeath[eeid] === 1) {
+          world.pendingSplits.push({ x: Position.x[eeid], y: Position.y[eeid] })
+        }
       }
 
       if (!isPassThrough) {

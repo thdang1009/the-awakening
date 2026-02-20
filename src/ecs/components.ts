@@ -34,8 +34,9 @@ export const Collider = defineComponent({
 export const Enemy = defineComponent({
   speed: Types.f32,
   damage: Types.f32,
-  attackCooldown: Types.f32,  // seconds
-  lastAttack: Types.f64,      // performance.now() timestamp (ms)
+  attackCooldown: Types.f32,   // seconds
+  lastAttack: Types.f64,       // performance.now() timestamp (ms)
+  splitsOnDeath: Types.ui8,    // 1 = spawns 2 mini-enemies when killed
 })
 
 /** Projectile lifetime tracking */

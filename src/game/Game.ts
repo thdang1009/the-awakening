@@ -16,6 +16,8 @@ import { spawnerSystem, resetSpawner, setSpawnerCallbacks } from '../systems/Spa
 import { Enemy } from '../ecs/components'
 import { SkillTreeStore } from '../skilltree/SkillTreeStore'
 import { SkillTreeUI } from '../skilltree/SkillTreeUI'
+import { StreamerMode } from '../streamer/StreamerMode'
+import { StreamerUI } from '../streamer/StreamerUI'
 import {
   CANVAS_WIDTH, CANVAS_HEIGHT,
   NEXUS_RADIUS, NEXUS_X, NEXUS_Y,
@@ -23,6 +25,7 @@ import {
   PROJECTILE_SPEED, PROJECTILE_DAMAGE, TextureId,
   BASE_FIRE_RATE, BASE_PROJECTILE_DAMAGE, BASE_PROJECTILE_SPEED,
   BASE_WEAPON_RANGE, BASE_NEXUS_MAX_HP,
+  BOSS_RADIUS, ENEMY_RADIUS,
 } from '../constants'
 import type { ComputedStats } from '../skilltree/types'
 
@@ -35,25 +38,20 @@ function applyStatsToNexus(world: GameWorld, stats: ComputedStats): void {
   const neid = world.nexusEid
   if (neid < 0) return
 
-  // Fire rate
-  let fr = BASE_FIRE_RATE * (1 + stats.fireRateBonus)
-  if (stats.machineGunProtocol) fr *= 2.8
-  if (stats.singularityCannon)  fr *= 0.6
-  Weapon.fireRate[neid] = fr
+  // Fire rate: additive bonus pool × multiplicative product
+  Weapon.fireRate[neid] =
+    BASE_FIRE_RATE * (1 + stats.fireRateBonus) * stats.fireRateMultiplier
 
-  // Damage
-  let dmg = BASE_PROJECTILE_DAMAGE * (1 + stats.damageBonus)
-  if (stats.singularityCannon)   dmg *= 2.0
-  if (stats.machineGunProtocol)  dmg *= 0.7
-  Weapon.damage[neid] = dmg
+  // Damage: same two-tier formula
+  Weapon.damage[neid] =
+    BASE_PROJECTILE_DAMAGE * (1 + stats.damageBonus) * stats.damageMultiplier
 
-  // Range & speed
-  Weapon.range[neid]           = BASE_WEAPON_RANGE    * (1 + stats.rangeBonus)
+  // Range & speed (additive only)
+  Weapon.range[neid]           = BASE_WEAPON_RANGE     * (1 + stats.rangeBonus)
   Weapon.projectileSpeed[neid] = BASE_PROJECTILE_SPEED * (1 + stats.speedBonus)
 
-  // Max HP (preserve current HP ratio to avoid instant kills)
-  let maxHP = BASE_NEXUS_MAX_HP * (1 + stats.maxHPBonus)
-  if (stats.indestructibleCore) maxHP *= 2.0
+  // Max HP — preserve current HP ratio to avoid instant death on tree change
+  const maxHP = BASE_NEXUS_MAX_HP * (1 + stats.maxHPBonus) * stats.maxHPMultiplier
   const ratio = Health.current[neid] / Health.max[neid]
   Health.max[neid]     = maxHP
   Health.current[neid] = Math.min(Health.current[neid], maxHP * ratio + 0.001)
@@ -71,10 +69,13 @@ export class Game {
   private waveText!: Text
   private scoreText!: Text
   private spBadge!: Text          // skill-point badge on tree button
+  private contextBadge!: Text | null  // shows active context event (night/weekend/etc)
   private gameOverContainer!: Container
   private waveResultText!: Text
 
   private treeUI!: SkillTreeUI
+  private streamerMode!: StreamerMode
+  private streamerUI!: StreamerUI
   private nexusPulseTimer = 0
   private treePrevOpen = false  // track tree open state to detect close event
 
@@ -93,6 +94,28 @@ export class Game {
     this.buildScene()        // bg, gameContainer, UI layers
     this.buildTreeButton()   // must be before SkillTreeUI (passes container ref)
     this.treeUI = new SkillTreeUI(this.app, new Container())
+
+    // Streamer mode
+    this.streamerMode = new StreamerMode()
+    this.streamerUI   = new StreamerUI(this.app, this.streamerMode)
+    this.streamerUI.onCommand((evt) => {
+      if (!this.world || this.world.gameOver) return
+      switch (evt.command) {
+        case 'spawn':
+          this.world.buffs.spawnWaveRequest = true
+          break
+        case 'buff':
+          this.world.buffs.fireRateMult  = 2
+          this.world.buffs.fireRateTimer = 10
+          break
+        case 'boss':
+          this.world.buffs.spawnBossRequest = true
+          break
+        case 'heal':
+          this.world.buffs.healRequest = true
+          break
+      }
+    })
 
     // Refresh SP badge whenever store changes
     SkillTreeStore.onChange(() => {
@@ -132,7 +155,45 @@ export class Game {
     pg.beginFill(0xffffff); pg.drawCircle(0, 0, 2); pg.endFill()
     const projTex = r.generateTexture(pg); pg.destroy()
 
-    return [nexusTex, enemyTex, projTex]
+    // Boss — large magenta circle with inner glow ring
+    const bg2 = new Graphics()
+    bg2.beginFill(0xcc0066, 0.22); bg2.drawCircle(0, 0, BOSS_RADIUS + 12); bg2.endFill()
+    bg2.beginFill(0xaa0044);       bg2.drawCircle(0, 0, BOSS_RADIUS);       bg2.endFill()
+    bg2.lineStyle(3, 0xff44ff, 1); bg2.drawCircle(0, 0, BOSS_RADIUS - 8)
+    bg2.beginFill(0xff88ff, 0.75); bg2.drawCircle(0, 0, 8);                 bg2.endFill()
+    const bossTex = r.generateTexture(bg2); bg2.destroy()
+
+    // EnemyFast (4) — diamond/spear shape for Dasher & Berserker
+    // White base so archetype tint drives the color
+    const R = ENEMY_RADIUS
+    const fg = new Graphics()
+    fg.beginFill(0xffffff)
+    fg.drawPolygon([0, -(R + 2), R - 2, 0, 0, R + 2, -(R - 2), 0])
+    fg.endFill()
+    fg.lineStyle(1.5, 0xdddddd, 0.7)
+    fg.drawPolygon([0, -(R - 5), R - 7, 0, 0, R - 5, -(R - 7), 0])
+    const fastTex = r.generateTexture(fg); fg.destroy()
+
+    // EnemyBrute (5) — heavy circle with thick border for Brute, Tank, Elite
+    const brG = new Graphics()
+    brG.beginFill(0xffffff, 0.25); brG.drawCircle(0, 0, R + 4); brG.endFill()
+    brG.beginFill(0xffffff);       brG.drawCircle(0, 0, R);      brG.endFill()
+    brG.lineStyle(3, 0xdddddd, 0.85); brG.drawCircle(0, 0, R - 5)
+    const bruteTex = r.generateTexture(brG); brG.destroy()
+
+    // EnemySwarm (6) — tiny plain dot for Swarm & Splitter fragments
+    const swG = new Graphics()
+    swG.beginFill(0xffffff); swG.drawCircle(0, 0, 7); swG.endFill()
+    const swarmTex = r.generateTexture(swG); swG.destroy()
+
+    // EnemyShadow (7) — hollow ghost ring for Shadow & Void
+    const shG = new Graphics()
+    shG.beginFill(0xffffff, 0.12); shG.drawCircle(0, 0, R + 2); shG.endFill()
+    shG.lineStyle(2.5, 0xffffff, 0.95); shG.drawCircle(0, 0, R)
+    shG.lineStyle(1,   0xffffff, 0.35); shG.drawCircle(0, 0, R - 6)
+    const shadowTex = r.generateTexture(shG); shG.destroy()
+
+    return [nexusTex, enemyTex, projTex, bossTex, fastTex, bruteTex, swarmTex, shadowTex]
   }
 
   // ---------------------------------------------------------------------------
@@ -178,6 +239,9 @@ export class Game {
     }))
     this.scoreText.x = CANVAS_WIDTH - 200; this.scoreText.y = 16
     ui.addChild(this.scoreText)
+
+    // Context event badge (shown only when an active event is detected)
+    this.contextBadge = null
 
     // Game-over overlay
     this.gameOverContainer = new Container()
@@ -249,6 +313,31 @@ export class Game {
   }
 
   // ---------------------------------------------------------------------------
+  // Context badge
+  // ---------------------------------------------------------------------------
+
+  private refreshContextBadge(label: string, color: string): void {
+    // Remove old badge if any
+    if (this.contextBadge) {
+      this.contextBadge.parent?.removeChild(this.contextBadge)
+      this.contextBadge.destroy()
+      this.contextBadge = null
+    }
+    if (!label) return
+
+    const badge = new Text(label, new TextStyle({
+      fill: color, fontSize: 14, fontFamily: 'monospace', fontWeight: 'bold',
+      dropShadow: true, dropShadowColor: '#000000', dropShadowDistance: 2,
+    }))
+    badge.anchor.set(0.5, 0)
+    badge.x = CANVAS_WIDTH / 2
+    badge.y = 40
+    // Add to stage directly so it sits above gameContainer
+    this.app.stage.addChild(badge)
+    this.contextBadge = badge
+  }
+
+  // ---------------------------------------------------------------------------
   // Session lifecycle
   // ---------------------------------------------------------------------------
 
@@ -256,6 +345,9 @@ export class Game {
     this.world = createGameWorld()
     this.renderSystem = new RenderSystem(this.textures, this.gameContainer)
     this.nexusPulseTimer = 0
+
+    // Show/hide context badge based on detected event
+    this.refreshContextBadge(this.world.context.eventLabel, this.world.context.eventColor)
 
     this.createNexus()
 
@@ -306,9 +398,11 @@ export class Game {
   }
 
   private onWaveComplete(wave: number): void {
-    const bonus = 1 + Math.floor(SkillTreeStore.computedStats.bonusSPPerWave)
+    const weekendBonus = this.world?.context.isWeekend ? 1 : 0
+    const bonus = 2 + Math.floor(SkillTreeStore.computedStats.bonusSPPerWave) + weekendBonus
     SkillTreeStore.addSkillPoints(bonus)
-    this.waveText.text = `Wave ${wave} — Clear!  (+${bonus} SP)`
+    const weekendTag = weekendBonus ? ' +WKD' : ''
+    this.waveText.text = `Wave ${wave} — Clear!  (+${bonus} SP${weekendTag})`
 
     // Restore 25% of max HP on each wave clear
     const neid = this.world.nexusEid
@@ -353,6 +447,9 @@ export class Game {
     // Tree animation runs always (even paused)
     this.treeUI?.animate(dt)
 
+    // Streamer feed animation runs always
+    this.streamerUI?.animate(dt)
+
     if (this.world.gameOver) {
       this.waveResultText.text =
         `Reached Wave ${this.world.wave}   •   Score: ${this.world.score}`
@@ -364,6 +461,29 @@ export class Game {
 
     this.world.delta   = dt
     this.world.elapsed += dt
+
+    // ---- Buff timer tick ----
+    const buffs = this.world.buffs
+    if (buffs.fireRateTimer > 0) {
+      buffs.fireRateTimer = Math.max(0, buffs.fireRateTimer - dt)
+      if (buffs.fireRateTimer === 0) buffs.fireRateMult = 1
+    }
+    if (buffs.enemySpeedTimer > 0) {
+      buffs.enemySpeedTimer = Math.max(0, buffs.enemySpeedTimer - dt)
+      if (buffs.enemySpeedTimer === 0) buffs.enemySpeedMult = 1
+    }
+
+    // One-shot heal request
+    if (buffs.healRequest) {
+      buffs.healRequest = false
+      const neid = this.world.nexusEid
+      if (neid >= 0) {
+        Health.current[neid] = Math.min(
+          Health.max[neid],
+          Health.current[neid] + Health.max[neid] * 0.30,
+        )
+      }
+    }
 
     // Systems — order matters
     enemyAISystem(this.world)

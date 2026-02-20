@@ -7,8 +7,11 @@ import {
   CANVAS_WIDTH, CANVAS_HEIGHT, SPAWN_MARGIN,
   ENEMY_RADIUS, ENEMY_BASE_SPEED, ENEMY_BASE_HP, ENEMY_DAMAGE,
   ENEMY_ATTACK_COOLDOWN, WAVE_BASE_ENEMY_COUNT, WAVE_ENEMY_COUNT_SCALING,
-  WAVE_SPEED_SCALING, WAVE_GRACE_PERIOD, WAVE_SPAWN_DELAY, TextureId,
+  WAVE_SPEED_SCALING, WAVE_GRACE_PERIOD, WAVE_SPAWN_DELAY,
+  BOSS_RADIUS, BOSS_HP, BOSS_SPEED, BOSS_DAMAGE, BOSS_ATTACK_COOLDOWN,
+  TextureId,
 } from '../constants'
+import { type EnemyArchetype, selectArchetype, contextTintOverride } from '../enemies/enemyTypes'
 
 interface SpawnerState {
   inGrace: boolean
@@ -50,27 +53,20 @@ function enemySpeedForWave(wave: number): number {
   return ENEMY_BASE_SPEED + (wave - 1) * WAVE_SPEED_SCALING
 }
 
-/** Tint shifts red → orange → purple as waves progress */
-function enemyTintForWave(wave: number): number {
-  if (wave <= 3) return 0xff3333
-  if (wave <= 6) return 0xff7733
-  return 0xaa33ff
+/** Spawn a random offscreen position on one of the 4 edges */
+function randomOffscreenPos(): { x: number; y: number } {
+  const side = Math.floor(Math.random() * 4)
+  switch (side) {
+    case 0: return { x: Math.random() * CANVAS_WIDTH, y: -SPAWN_MARGIN }
+    case 1: return { x: CANVAS_WIDTH + SPAWN_MARGIN, y: Math.random() * CANVAS_HEIGHT }
+    case 2: return { x: Math.random() * CANVAS_WIDTH, y: CANVAS_HEIGHT + SPAWN_MARGIN }
+    default: return { x: -SPAWN_MARGIN, y: Math.random() * CANVAS_HEIGHT }
+  }
 }
 
-function spawnEnemy(world: GameWorld): void {
+function spawnBoss(world: GameWorld): void {
   const eid = addEntity(world)
-  const wave = world.wave
-
-  // Random spawn position outside the screen on any of the 4 sides
-  const side = Math.floor(Math.random() * 4)
-  let x = 0
-  let y = 0
-  switch (side) {
-    case 0: x = Math.random() * CANVAS_WIDTH; y = -SPAWN_MARGIN; break
-    case 1: x = CANVAS_WIDTH + SPAWN_MARGIN; y = Math.random() * CANVAS_HEIGHT; break
-    case 2: x = Math.random() * CANVAS_WIDTH; y = CANVAS_HEIGHT + SPAWN_MARGIN; break
-    default: x = -SPAWN_MARGIN; y = Math.random() * CANVAS_HEIGHT; break
-  }
+  const { x, y } = randomOffscreenPos()
 
   addComponent(world, Position, eid)
   Position.x[eid] = x
@@ -81,22 +77,107 @@ function spawnEnemy(world: GameWorld): void {
   Velocity.y[eid] = 0
 
   addComponent(world, Health, eid)
-  Health.current[eid] = ENEMY_BASE_HP
-  Health.max[eid] = ENEMY_BASE_HP
+  Health.current[eid] = BOSS_HP
+  Health.max[eid]     = BOSS_HP
 
   addComponent(world, Enemy, eid)
-  Enemy.speed[eid] = enemySpeedForWave(wave)
-  Enemy.damage[eid] = ENEMY_DAMAGE
-  Enemy.attackCooldown[eid] = ENEMY_ATTACK_COOLDOWN
-  Enemy.lastAttack[eid] = 0
+  Enemy.speed[eid]          = BOSS_SPEED
+  Enemy.damage[eid]         = BOSS_DAMAGE
+  Enemy.attackCooldown[eid] = BOSS_ATTACK_COOLDOWN
+  Enemy.lastAttack[eid]     = 0
+  Enemy.splitsOnDeath[eid]  = 0
 
   addComponent(world, Collider, eid)
-  Collider.radius[eid] = ENEMY_RADIUS
+  Collider.radius[eid] = BOSS_RADIUS
 
   addComponent(world, Renderable, eid)
-  Renderable.textureId[eid] = TextureId.Enemy
-  Renderable.tint[eid] = enemyTintForWave(wave)
-  Renderable.scale[eid] = 1.0
+  Renderable.textureId[eid] = TextureId.Boss
+  Renderable.tint[eid]      = 0xffffff
+  Renderable.scale[eid]     = 1.0
+}
+
+/** Spawn a single enemy entity using the given archetype */
+function spawnEnemyEntity(world: GameWorld, archetype: EnemyArchetype): void {
+  const eid  = addEntity(world)
+  const wave = world.wave
+  const { x, y } = randomOffscreenPos()
+
+  addComponent(world, Position, eid)
+  Position.x[eid] = x
+  Position.y[eid] = y
+
+  addComponent(world, Velocity, eid)
+  Velocity.x[eid] = 0
+  Velocity.y[eid] = 0
+
+  const baseHP = ENEMY_BASE_HP + Math.floor(wave / 2)
+  const hp     = Math.max(1, Math.round(baseHP * archetype.hpMult))
+  addComponent(world, Health, eid)
+  Health.current[eid] = hp
+  Health.max[eid]     = hp
+
+  addComponent(world, Enemy, eid)
+  Enemy.speed[eid]          = enemySpeedForWave(wave) * archetype.speedMult
+  Enemy.damage[eid]         = ENEMY_DAMAGE * archetype.damageMult
+  Enemy.attackCooldown[eid] = ENEMY_ATTACK_COOLDOWN * archetype.cooldownMult
+  Enemy.lastAttack[eid]     = 0
+  Enemy.splitsOnDeath[eid]  = archetype.splitsOnDeath ? 1 : 0
+
+  addComponent(world, Collider, eid)
+  Collider.radius[eid] = ENEMY_RADIUS * archetype.scale
+
+  const tint = contextTintOverride(archetype.tint, world.context)
+  addComponent(world, Renderable, eid)
+  Renderable.textureId[eid] = archetype.textureId
+  Renderable.tint[eid]      = tint
+  Renderable.scale[eid]     = archetype.scale
+}
+
+/** Spawn one archetype "slot" — may create multiple entities (e.g. Swarm) */
+function spawnEnemy(world: GameWorld): void {
+  const archetype = selectArchetype(world.wave, world.context)
+  for (let i = 0; i < archetype.spawnGroupSize; i++) {
+    spawnEnemyEntity(world, archetype)
+  }
+}
+
+/** Mini-enemy spawned when a Splitter dies */
+export function spawnSplitFragment(world: GameWorld, ox: number, oy: number): void {
+  const wave = world.wave
+  for (let i = 0; i < 2; i++) {
+    const eid = addEntity(world)
+    const angle = Math.random() * Math.PI * 2
+    const spread = 16
+
+    addComponent(world, Position, eid)
+    Position.x[eid] = ox + Math.cos(angle) * spread
+    Position.y[eid] = oy + Math.sin(angle) * spread
+
+    addComponent(world, Velocity, eid)
+    Velocity.x[eid] = 0
+    Velocity.y[eid] = 0
+
+    const hp = Math.max(1, Math.floor((ENEMY_BASE_HP + Math.floor(wave / 2)) * 0.4))
+    addComponent(world, Health, eid)
+    Health.current[eid] = hp
+    Health.max[eid]     = hp
+
+    addComponent(world, Enemy, eid)
+    Enemy.speed[eid]          = enemySpeedForWave(wave) * 1.3
+    Enemy.damage[eid]         = ENEMY_DAMAGE * 0.6
+    Enemy.attackCooldown[eid] = ENEMY_ATTACK_COOLDOWN
+    Enemy.lastAttack[eid]     = 0
+    Enemy.splitsOnDeath[eid]  = 0    // fragments do NOT split again
+
+    addComponent(world, Collider, eid)
+    Collider.radius[eid] = ENEMY_RADIUS * 0.6
+
+    const tint = contextTintOverride(0xffaa33, world.context)
+    addComponent(world, Renderable, eid)
+    Renderable.textureId[eid] = TextureId.EnemySwarm
+    Renderable.tint[eid]      = tint
+    Renderable.scale[eid]     = 0.6
+  }
 }
 
 /**
@@ -106,16 +187,33 @@ function spawnEnemy(world: GameWorld): void {
 export function spawnerSystem(world: GameWorld, aliveEnemyCount: number): void {
   if (world.gameOver || world.paused) return
 
+  // ── Process pending Splitter fragments ──────────────────────────────────
+  while (world.pendingSplits.length > 0) {
+    const pos = world.pendingSplits.pop()!
+    spawnSplitFragment(world, pos.x, pos.y)
+  }
+
+  // ── Handle one-shot viewer requests from Streamer Mode ─────────────────
+  if (world.buffs.spawnBossRequest) {
+    world.buffs.spawnBossRequest = false
+    spawnBoss(world)
+  }
+  if (world.buffs.spawnWaveRequest) {
+    world.buffs.spawnWaveRequest = false
+    const extraCount = 5 + Math.floor(world.wave * 0.5)
+    for (let i = 0; i < extraCount; i++) spawnEnemy(world)
+  }
+
   const dt = world.delta
 
   if (state.inGrace) {
     state.graceTimer += dt
     if (state.graceTimer >= WAVE_GRACE_PERIOD) {
       world.wave++
-      state.graceTimer = 0
-      state.inGrace = false
+      state.graceTimer       = 0
+      state.inGrace          = false
       state.enemiesRemaining = enemyCountForWave(world.wave)
-      state.spawnTimer = 0
+      state.spawnTimer       = 0
       _onWaveStart?.(world.wave)
     }
     return
@@ -131,7 +229,7 @@ export function spawnerSystem(world: GameWorld, aliveEnemyCount: number): void {
   } else if (aliveEnemyCount === 0) {
     // All enemies spawned and killed — wave complete
     _onWaveComplete?.(world.wave)
-    state.inGrace = true
+    state.inGrace    = true
     state.graceTimer = 0
   }
 }

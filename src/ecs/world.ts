@@ -1,6 +1,34 @@
 import { createWorld } from 'bitecs'
 import type { ComputedStats } from '../skilltree/types'
-import { DEFAULT_STATS } from '../skilltree/types'
+import { createDefaultStats } from '../skilltree/types'
+import { type GameContext, detectContext } from '../context/DateTimeContext'
+
+export type { GameContext }
+
+// ---------------------------------------------------------------------------
+// Timed / one-shot viewer-buff state (used by Streamer Mode)
+// ---------------------------------------------------------------------------
+
+export interface WorldBuffs {
+  /** Fire rate multiplier on top of weapon stats (1.0 = no buff) */
+  fireRateMult:   number
+  /** Seconds remaining for the fire rate buff (0 = inactive) */
+  fireRateTimer:  number
+  /** Enemy speed multiplier (1.0 = normal) */
+  enemySpeedMult:  number
+  /** Seconds remaining for the enemy speed buff (0 = inactive) */
+  enemySpeedTimer: number
+  /** Consume-once flag: immediately spawn a mini-wave */
+  spawnWaveRequest: boolean
+  /** Consume-once flag: spawn a boss enemy */
+  spawnBossRequest: boolean
+  /** Consume-once flag: restore 30 % of Nexus max HP */
+  healRequest: boolean
+}
+
+// ---------------------------------------------------------------------------
+// Extended world type
+// ---------------------------------------------------------------------------
 
 /** Extended world with game-level state */
 export type GameWorld = ReturnType<typeof createWorld> & {
@@ -12,17 +40,33 @@ export type GameWorld = ReturnType<typeof createWorld> & {
   wave: number
   score: number
   stats: ComputedStats  // current computed skill-tree stats (read by systems)
+  buffs: WorldBuffs
+  /** DateTime-based game context, detected once at session start */
+  context: GameContext
+  /** Pending split-spawn requests from Splitter enemies (written by CollisionSystem, consumed by SpawnerSystem) */
+  pendingSplits: Array<{ x: number; y: number }>
 }
 
 export function createGameWorld(): GameWorld {
   const world = createWorld() as GameWorld
-  world.delta = 0
+  world.delta   = 0
   world.elapsed = 0
-  world.nexusEid = -1
-  world.gameOver = false
-  world.paused = false
-  world.wave = 0
-  world.score = 0
-  world.stats = { ...DEFAULT_STATS }
+  world.nexusEid  = -1
+  world.gameOver  = false
+  world.paused    = false
+  world.wave      = 0
+  world.score     = 0
+  world.stats     = createDefaultStats()
+  world.buffs     = {
+    fireRateMult:     1,
+    fireRateTimer:    0,
+    enemySpeedMult:   1,
+    enemySpeedTimer:  0,
+    spawnWaveRequest: false,
+    spawnBossRequest: false,
+    healRequest:      false,
+  }
+  world.context       = detectContext()
+  world.pendingSplits = []
   return world
 }

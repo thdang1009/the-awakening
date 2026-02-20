@@ -24,7 +24,7 @@ export function enemyAISystem(world: GameWorld): void {
     const dist = Math.sqrt(dx * dx + dy * dy)
     if (dist < 0.1) continue
 
-    const speed = Enemy.speed[eid]
+    const speed = Enemy.speed[eid] * world.buffs.enemySpeedMult
     Velocity.x[eid] = (dx / dist) * speed
     Velocity.y[eid] = (dy / dist) * speed
   }

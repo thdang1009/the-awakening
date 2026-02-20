@@ -2,26 +2,62 @@
 // Skill Tree — Type Definitions
 // ---------------------------------------------------------------------------
 
-/** Which additive bonus pool a node effect targets */
-export type StatKey =
-  | 'fireRateBonus'    // adds to fire-rate multiplier pool
-  | 'damageBonus'      // adds to damage multiplier pool
-  | 'speedBonus'       // adds to projectile-speed multiplier pool
-  | 'rangeBonus'       // adds to range multiplier pool
-  | 'maxHPBonus'       // adds to max-HP multiplier pool
-  | 'armorFlat'        // flat incoming-damage reduction (0–0.9)
-  | 'scoreBonus'       // adds to score multiplier pool
-  | 'bonusSPPerWave'   // extra skill points awarded per wave clear
-  | 'multishotAdd'     // extra projectiles fired per shot
+// ─── Stat names ──────────────────────────────────────────────────────────────
 
-/** Keystone identifiers — each flips a boolean flag in ComputedStats */
-export type KeystoneId =
-  | 'machineGunProtocol'  // ×2.8 fire rate, ×0.7 damage
-  | 'singularityCannon'   // ×2.0 damage, ×0.6 fire rate
-  | 'indestructibleCore'  // ×2.0 max HP, −25% damage taken
-  | 'quantumTunneling'    // projectiles pass through enemies
-  | 'novaBurst'           // fires 8 projectiles in all directions
-  | 'omniscient'          // ×2 score per kill
+/**
+ * Additive stats — summed across all active nodes.
+ * Applied as:  finalValue = BASE × (1 + totalBonus)
+ */
+export type AdditiveStat =
+  | 'fireRateBonus'   // +X% fire rate
+  | 'damageBonus'     // +X% damage per projectile
+  | 'speedBonus'      // +X% projectile travel speed
+  | 'rangeBonus'      // +X% targeting radius
+  | 'maxHPBonus'      // +X% maximum HP
+  | 'armorFlat'       // flat incoming-damage reduction (0 – 0.85 cap)
+  | 'scoreBonus'      // +X% score per kill
+  | 'bonusSPPerWave'  // extra skill points awarded per wave clear
+  | 'multishotAdd'    // extra projectiles per salvo
+
+/**
+ * Multiplicative stats — each node's value is MULTIPLIED together.
+ * Applied as:  finalValue = BASE × (1 + additiveBonus) × ∏(multipliers)
+ * Default is 1.0; a node contributing 0.7 reduces the stat by 30%.
+ */
+export type MultiplicativeStat =
+  | 'fireRateMultiplier'     // e.g. 2.8  → fire rate ×2.8
+  | 'damageMultiplier'       // e.g. 0.7  → damage  ×0.7
+  | 'maxHPMultiplier'        // e.g. 2.0  → max HP  ×2.0
+  | 'damageTakenMultiplier'  // e.g. 0.75 → take 25% less damage
+  | 'scoreMultiplier'        // e.g. 2.0  → score per kill ×2.0
+
+/** Union of every stat name accepted by NodeEffect */
+export type StatName = AdditiveStat | MultiplicativeStat
+
+// ─── Behavior types ───────────────────────────────────────────────────────────
+
+/**
+ * Named gameplay-behaviour tags attached to skill nodes.
+ * ECS systems read `stats.behaviors.has(b)` to conditionally alter logic.
+ * Tags marked (future) are defined in data now; systems to be wired later.
+ */
+export type BehaviorType =
+  // Projectile path
+  | 'INFINITE_PIERCE'  // projectile ignores collision removal — hits every enemy in path
+  | 'PIERCING_1'       // (future) passes through the first enemy, stops on the second
+  | 'CHAIN_1'          // (future) bounces to 1 additional enemy after first kill
+  | 'EXPLOSIVE'        // (future) AoE burst when projectile expires or is consumed
+  | 'HOMING'           // (future) projectile gradually steers toward closest enemy
+  | 'KNOCKBACK'        // (future) pushes enemy away from Nexus on projectile hit
+  // Firing mode
+  | 'NOVA_BURST'       // ignores auto-aim; fires 8 evenly-spaced projectiles per salvo
+  | 'RAPID_BURST'      // (future) tight 3-shot bursts with a gap between clusters
+  // Defence
+  | 'THORNS'           // (future) enemies that deal contact damage take reflected damage
+  // Kill finisher
+  | 'CULL_THRESHOLD'   // (future) enemies below 20% HP are instantly removed
+
+// ─── Node tiers / branches ───────────────────────────────────────────────────
 
 export type NodeTier = 'start' | 'small' | 'notable' | 'keystone'
 
@@ -33,65 +69,81 @@ export type BranchId =
   | 'warp'
   | 'chain'
   | 'collector'
-  | 'junction'          // cross-branch connector nodes
+  | 'junction'
 
-/** A single bonus applied when the node is active */
+// ─── Node effect & node ──────────────────────────────────────────────────────
+
+/** A single numeric modifier granted when the node is active */
 export interface NodeEffect {
-  stat: StatKey
+  stat:  StatName
   value: number
 }
 
 /** A node in the skill tree graph */
 export interface SkillNode {
-  id: string
-  x: number             // position in tree-space (px)
-  y: number
-  tier: NodeTier
-  branch: BranchId
-  label: string
+  id:          string
+  x:           number         // position in tree-space (px)
+  y:           number
+  tier:        NodeTier
+  branch:      BranchId
+  label:       string
   description: string
-  connections: string[] // IDs of adjacent nodes (used to build bidirectional map)
-  effects: NodeEffect[]
-  keystoneId?: KeystoneId
-  cost: number          // skill points to activate
+  connections: string[]       // IDs of adjacent nodes (bidirectional)
+  cost:        number         // skill points to activate
+  effects:     NodeEffect[]   // stat modifiers granted when active
+  behaviors?:  BehaviorType[] // gameplay behaviour tags granted when active
 }
 
-/** Accumulated stats after summing all active nodes */
+// ─── Computed stats ───────────────────────────────────────────────────────────
+
+/** Accumulated result of all active nodes — ready for ECS systems to consume */
 export interface ComputedStats {
-  // Additive bonus pools (add to these, final mult = 1 + bonus)
-  fireRateBonus: number
-  damageBonus: number
-  speedBonus: number
-  rangeBonus: number
-  maxHPBonus: number
-  armorFlat: number        // damage reduction fraction
-  scoreBonus: number
+  // Additive pools (sum across active nodes; final stat = BASE × (1 + total))
+  fireRateBonus:  number
+  damageBonus:    number
+  speedBonus:     number
+  rangeBonus:     number
+  maxHPBonus:     number
+  armorFlat:      number
+  scoreBonus:     number
   bonusSPPerWave: number
-  multishotAdd: number
+  multishotAdd:   number
 
-  // Keystones
-  machineGunProtocol: boolean
-  singularityCannon: boolean
-  indestructibleCore: boolean
-  quantumTunneling: boolean
-  novaBurst: boolean
-  omniscient: boolean
+  // Multiplicative pools (product of node values; 1.0 when no node contributes)
+  fireRateMultiplier:    number
+  damageMultiplier:      number
+  maxHPMultiplier:       number
+  damageTakenMultiplier: number
+  scoreMultiplier:       number
+
+  // Union of all behavior tags on active nodes
+  behaviors: Set<BehaviorType>
 }
 
-export const DEFAULT_STATS: ComputedStats = {
-  fireRateBonus: 0,
-  damageBonus: 0,
-  speedBonus: 0,
-  rangeBonus: 0,
-  maxHPBonus: 0,
-  armorFlat: 0,
-  scoreBonus: 0,
-  bonusSPPerWave: 0,
-  multishotAdd: 0,
-  machineGunProtocol: false,
-  singularityCannon: false,
-  indestructibleCore: false,
-  quantumTunneling: false,
-  novaBurst: false,
-  omniscient: false,
+// ─── Factory ─────────────────────────────────────────────────────────────────
+
+/** Always returns a fresh ComputedStats with correct defaults — never share the reference */
+export function createDefaultStats(): ComputedStats {
+  return {
+    fireRateBonus:  0,
+    damageBonus:    0,
+    speedBonus:     0,
+    rangeBonus:     0,
+    maxHPBonus:     0,
+    armorFlat:      0,
+    scoreBonus:     0,
+    bonusSPPerWave: 0,
+    multishotAdd:   0,
+
+    fireRateMultiplier:    1,
+    damageMultiplier:      1,
+    maxHPMultiplier:       1,
+    damageTakenMultiplier: 1,
+    scoreMultiplier:       1,
+
+    behaviors: new Set<BehaviorType>(),
+  }
 }
+
+/** @deprecated — use createDefaultStats() to avoid shared Set reference */
+export const DEFAULT_STATS = createDefaultStats()

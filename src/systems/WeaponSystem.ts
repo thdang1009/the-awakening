@@ -72,7 +72,7 @@ export function weaponSystem(world: GameWorld): void {
   const neid      = nexii[0]
   const nx        = Position.x[neid]
   const ny        = Position.y[neid]
-  const fireRate  = Weapon.fireRate[neid]
+  const fireRate   = Weapon.fireRate[neid] * world.buffs.fireRateMult
   const cooldownMs = 1000 / fireRate
 
   const now = performance.now()
@@ -82,12 +82,12 @@ export function weaponSystem(world: GameWorld): void {
   const dmg   = Weapon.damage[neid]
   const spd   = Weapon.projectileSpeed[neid]
   const range = Weapon.range[neid]
-  const pt    = stats.quantumTunneling
+  const pt    = stats.behaviors.has('INFINITE_PIERCE')
 
   Weapon.lastFire[neid] = now
 
   // --- Nova Burst: fire 8 projectiles in all directions ---
-  if (stats.novaBurst) {
+  if (stats.behaviors.has('NOVA_BURST')) {
     for (let i = 0; i < 8; i++) {
       spawnProjectile(world, nx, ny, i * 45, dmg, spd, pt)
     }
