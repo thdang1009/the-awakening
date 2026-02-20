@@ -45,6 +45,12 @@ export type GameWorld = ReturnType<typeof createWorld> & {
   context: GameContext
   /** Pending split-spawn requests from Splitter enemies (written by CollisionSystem, consumed by SpawnerSystem) */
   pendingSplits: Array<{ x: number; y: number }>
+  /** 0–1 heat level for THERMAL_ACCELERATION; ramps up during sustained fire */
+  thermalHeat: number
+  /** Current sweep angle (radians) for BEAM_MODE + SWEEPING */
+  beamAngle: number
+  /** Countdown until next AURA_DAMAGE pulse (seconds) */
+  auraTimer: number
 }
 
 export function createGameWorld(): GameWorld {
@@ -68,5 +74,8 @@ export function createGameWorld(): GameWorld {
   }
   world.context       = detectContext()
   world.pendingSplits = []
+  world.thermalHeat   = 0
+  world.beamAngle     = 0
+  world.auraTimer     = 0
   return world
 }

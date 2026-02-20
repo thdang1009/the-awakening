@@ -25,8 +25,8 @@ export type AdditiveStat =
  * Default is 1.0; a node contributing 0.7 reduces the stat by 30%.
  */
 export type MultiplicativeStat =
-  | 'fireRateMultiplier'     // e.g. 2.8  → fire rate ×2.8
-  | 'damageMultiplier'       // e.g. 0.7  → damage  ×0.7
+  | 'fireRateMultiplier'     // e.g. 3.5  → fire rate ×3.5
+  | 'damageMultiplier'       // e.g. 0.6  → damage  ×0.6
   | 'maxHPMultiplier'        // e.g. 2.0  → max HP  ×2.0
   | 'damageTakenMultiplier'  // e.g. 0.75 → take 25% less damage
   | 'scoreMultiplier'        // e.g. 2.0  → score per kill ×2.0
@@ -39,23 +39,41 @@ export type StatName = AdditiveStat | MultiplicativeStat
 /**
  * Named gameplay-behaviour tags attached to skill nodes.
  * ECS systems read `stats.behaviors.has(b)` to conditionally alter logic.
- * Tags marked (future) are defined in data now; systems to be wired later.
+ * Tags marked (future) are defined in data now; systems to be wired in a later phase.
  */
 export type BehaviorType =
-  // Projectile path
-  | 'INFINITE_PIERCE'  // projectile ignores collision removal — hits every enemy in path
-  | 'PIERCING_1'       // (future) passes through the first enemy, stops on the second
-  | 'CHAIN_1'          // (future) bounces to 1 additional enemy after first kill
-  | 'EXPLOSIVE'        // (future) AoE burst when projectile expires or is consumed
-  | 'HOMING'           // (future) projectile gradually steers toward closest enemy
-  | 'KNOCKBACK'        // (future) pushes enemy away from Nexus on projectile hit
-  // Firing mode
-  | 'NOVA_BURST'       // ignores auto-aim; fires 8 evenly-spaced projectiles per salvo
-  | 'RAPID_BURST'      // (future) tight 3-shot bursts with a gap between clusters
-  // Defence
-  | 'THORNS'           // (future) enemies that deal contact damage take reflected damage
-  // Kill finisher
-  | 'CULL_THRESHOLD'   // (future) enemies below 20% HP are instantly removed
+  // ── Rapid Fire branch ─────────────────────────────────────────────────────
+  | 'BEAM_MODE'              // replaces projectiles with a continuous laser beam
+  | 'SWEEPING'               // beam sweeps an arc across nearby enemy clusters
+  | 'THERMAL_ACCELERATION'   // (future) fire rate ramps up during sustained fire
+  // ── Heavy Strike branch ───────────────────────────────────────────────────
+  | 'KNOCKBACK'              // pushes enemy away from Nexus on projectile hit
+  | 'DELAYED_EXPLOSION'      // (future) projectile embeds then detonates after a delay
+  // ── Bulwark branch ────────────────────────────────────────────────────────
+  | 'AURA_DAMAGE'            // (future) Nexus emits a pulsing damage ring scaling with HP
+  | 'SCALES_WITH_HP'         // (future) offensive power scales with current / max HP
+  // ── Warp branch ───────────────────────────────────────────────────────────
+  | 'BOOMERANG'              // (future) projectiles arc back to Nexus after max range
+  | 'SPAWN_BLACKHOLE'        // (future) projectile becomes a gravity well at max range
+  | 'MAGNETIC_PULL'          // (future) gravity well pulls nearby enemies inward
+  // ── Chain branch ──────────────────────────────────────────────────────────
+  | 'SEEKER'                 // (future) projectiles curve toward closest enemy mid-flight
+  | 'CHAIN_LIGHTNING'        // (future) lightning bounces to additional enemies on kill
+  | 'SMART_TARGETING'        // (future) always fires at the highest-HP enemy in range
+  // ── Collector branch ──────────────────────────────────────────────────────
+  | 'KINETIC_HARVEST'        // (future) score pickups emit radiation damaging nearby enemies
+  | 'DAMAGE_SCALES_WITH_SCORE' // (future) projectile damage increases with current score
+  | 'ORBITAL_DRONES'         // (future) spawns orbiting combat drones when SP is spent
+  // ── Legacy (not granted by any current node; kept for system compatibility) ─
+  | 'INFINITE_PIERCE'        // projectile ignores collision — hits every enemy in path
+  | 'PIERCING_1'             // passes through first enemy, stops on second
+  | 'CHAIN_1'                // bounces to 1 additional enemy after first kill
+  | 'EXPLOSIVE'              // AoE burst when projectile expires or is consumed
+  | 'HOMING'                 // projectile gradually steers toward closest enemy
+  | 'NOVA_BURST'             // fires 8 evenly-spaced projectiles per salvo
+  | 'RAPID_BURST'            // tight 3-shot bursts with a gap between clusters
+  | 'THORNS'                 // enemies that deal contact damage take reflected damage
+  | 'CULL_THRESHOLD'         // enemies below 20% HP are instantly removed
 
 // ─── Node tiers / branches ───────────────────────────────────────────────────
 

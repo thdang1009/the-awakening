@@ -62,4 +62,6 @@ export enum TextureId {
   EnemyBrute  = 5,   // heavy circle — Brute, Tank, Elite
   EnemySwarm  = 6,   // tiny dot — Swarm, Splitter fragments
   EnemyShadow = 7,   // hollow ring — Shadow, Void
+  Bomb        = 8,   // pulsing charge indicator — DELAYED_EXPLOSION
+  Blackhole   = 9,   // dark gravity well — SPAWN_BLACKHOLE
 }

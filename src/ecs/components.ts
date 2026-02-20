@@ -52,6 +52,25 @@ export const IsNexus = defineComponent()
 /** Tag: projectile passes through enemies without being destroyed */
 export const PassThrough = defineComponent()
 
+/** Tag: projectile steers toward nearest enemy each frame (SEEKER behavior) */
+export const Seeker = defineComponent()
+
+/** Tag: projectile reverses toward Nexus after 45% of lifetime (BOOMERANG behavior) */
+export const Boomerang = defineComponent()
+
+/** Delayed explosive charge — ticks down then detonates in AoE (DELAYED_EXPLOSION behavior) */
+export const Bomb = defineComponent({
+  timer:  Types.f32,   // seconds until detonation
+  radius: Types.f32,   // AoE explosion radius (px)
+  damage: Types.f32,   // explosion damage per enemy hit
+})
+
+/** Gravity well entity — pulls nearby enemies inward (SPAWN_BLACKHOLE / MAGNETIC_PULL behavior) */
+export const Blackhole = defineComponent({
+  timer:  Types.f32,   // seconds remaining
+  radius: Types.f32,   // pull radius (px)
+})
+
 /** Auto-attack weapon mounted on Nexus */
 export const Weapon = defineComponent({
   damage: Types.f32,

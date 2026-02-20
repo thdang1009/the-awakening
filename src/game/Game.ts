@@ -13,6 +13,9 @@ import { weaponSystem } from '../systems/WeaponSystem'
 import { collisionSystem } from '../systems/CollisionSystem'
 import { lifetimeSystem } from '../systems/LifetimeSystem'
 import { spawnerSystem, resetSpawner, setSpawnerCallbacks } from '../systems/SpawnerSystem'
+import { auraSystem } from '../systems/AuraSystem'
+import { bombSystem } from '../systems/BombSystem'
+import { blackholeSystem } from '../systems/BlackholeSystem'
 import { Enemy } from '../ecs/components'
 import { SkillTreeStore } from '../skilltree/SkillTreeStore'
 import { SkillTreeUI } from '../skilltree/SkillTreeUI'
@@ -193,7 +196,22 @@ export class Game {
     shG.lineStyle(1,   0xffffff, 0.35); shG.drawCircle(0, 0, R - 6)
     const shadowTex = r.generateTexture(shG); shG.destroy()
 
-    return [nexusTex, enemyTex, projTex, bossTex, fastTex, bruteTex, swarmTex, shadowTex]
+    // Bomb (8) — pulsing orange charge indicator for DELAYED_EXPLOSION
+    const bmG = new Graphics()
+    bmG.beginFill(0xffffff, 0.3); bmG.drawCircle(0, 0, 14); bmG.endFill()
+    bmG.beginFill(0xffffff);      bmG.drawCircle(0, 0,  8); bmG.endFill()
+    bmG.lineStyle(1.5, 0xffffff, 0.9); bmG.drawCircle(0, 0, 12)
+    const bombTex = r.generateTexture(bmG); bmG.destroy()
+
+    // Blackhole (9) — dark ring for EVENT HORIZON gravity well
+    const bhG = new Graphics()
+    bhG.beginFill(0x110022, 0.85); bhG.drawCircle(0, 0, 22); bhG.endFill()
+    bhG.lineStyle(2, 0xffffff, 0.7); bhG.drawCircle(0, 0, 20)
+    bhG.lineStyle(1, 0xffffff, 0.25); bhG.drawCircle(0, 0, 13)
+    const blackholeTex = r.generateTexture(bhG); bhG.destroy()
+
+    return [nexusTex, enemyTex, projTex, bossTex, fastTex, bruteTex, swarmTex, shadowTex,
+            bombTex, blackholeTex]
   }
 
   // ---------------------------------------------------------------------------
@@ -489,7 +507,10 @@ export class Game {
     enemyAISystem(this.world)
     weaponSystem(this.world)
     movementSystem(this.world)
+    auraSystem(this.world)
     collisionSystem(this.world)
+    bombSystem(this.world)
+    blackholeSystem(this.world)
     lifetimeSystem(this.world)
 
     const aliveEnemies = enemyQuery(this.world).length
