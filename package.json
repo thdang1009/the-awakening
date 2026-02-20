@@ -1,0 +1,19 @@
+{
+  "name": "nexus-the-awakening",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "bitecs": "^0.3.40",
+    "pixi.js": "^7.4.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3",
+    "vite": "^5.1.0"
+  }
+}
