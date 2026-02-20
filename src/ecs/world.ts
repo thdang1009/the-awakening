@@ -73,6 +73,14 @@ export type GameWorld = ReturnType<typeof createWorld> & {
   catalysts: string[]
   /** Pending gem spawns (written by CollisionSystem/AuraSystem, consumed by GemSystem) */
   pendingGems: Array<{ x: number; y: number }>
+
+  // ── Phase 3: The Casino ────────────────────────────────────────────────
+  /** Pending chest spawns (written by kill systems when an elite dies) */
+  pendingChests: Array<{ x: number; y: number }>
+  /** Consume-once: triggers the Roulette pause */
+  pendingRoulette: boolean
+  /** True while the Roulette slot machine overlay is visible */
+  roulettePause: boolean
 }
 
 export function createGameWorld(): GameWorld {
@@ -111,6 +119,11 @@ export function createGameWorld(): GameWorld {
   world.peripherals     = []
   world.catalysts       = []
   world.pendingGems     = []
+
+  // Phase 3
+  world.pendingChests   = []
+  world.pendingRoulette = false
+  world.roulettePause   = false
 
   return world
 }

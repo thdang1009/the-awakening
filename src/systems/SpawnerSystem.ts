@@ -1,6 +1,6 @@
 import { addComponent, addEntity } from 'bitecs'
 import {
-  Position, Velocity, Health, Renderable, Enemy, Collider,
+  Position, Velocity, Health, Renderable, Enemy, Collider, IsElite,
 } from '../ecs/components'
 import { GameWorld } from '../ecs/world'
 import {
@@ -9,6 +9,7 @@ import {
   ENEMY_ATTACK_COOLDOWN, WAVE_BASE_ENEMY_COUNT, WAVE_ENEMY_COUNT_SCALING,
   WAVE_SPEED_SCALING, WAVE_GRACE_PERIOD, WAVE_SPAWN_DELAY,
   BOSS_RADIUS, BOSS_HP, BOSS_SPEED, BOSS_DAMAGE, BOSS_ATTACK_COOLDOWN,
+  ELITE_HP_MULT, ELITE_SPEED_MULT, ELITE_SCALE, ELITE_DAMAGE_MULT,
   TextureId,
 } from '../constants'
 import { type EnemyArchetype, selectArchetype, contextTintOverride } from '../enemies/enemyTypes'
@@ -18,6 +19,7 @@ interface SpawnerState {
   graceTimer: number
   enemiesRemaining: number
   spawnTimer: number
+  elitesPending: number   // elites queued to spawn this wave
 }
 
 const state: SpawnerState = {
@@ -25,6 +27,7 @@ const state: SpawnerState = {
   graceTimer: 0,
   enemiesRemaining: 0,
   spawnTimer: 0,
+  elitesPending: 0,
 }
 
 let _onWaveStart:    ((wave: number) => void) | null = null
@@ -43,6 +46,7 @@ export function resetSpawner(): void {
   state.graceTimer = 0
   state.enemiesRemaining = 0
   state.spawnTimer = 0
+  state.elitesPending = 0
 }
 
 function enemyCountForWave(wave: number): number {
@@ -104,6 +108,44 @@ function spawnBoss(world: GameWorld): void {
   Renderable.textureId[eid] = TextureId.Boss
   Renderable.tint[eid]      = 0xffffff
   Renderable.scale[eid]     = 1.0
+}
+
+/** Spawn a single Elite enemy — tanky, gold-tinted, always drops a chest */
+function spawnElite(world: GameWorld): void {
+  const eid  = addEntity(world)
+  const wave = world.wave
+  const { x, y } = randomOffscreenPos(world)
+
+  addComponent(world, Position, eid)
+  Position.x[eid] = x
+  Position.y[eid] = y
+
+  addComponent(world, Velocity, eid)
+  Velocity.x[eid] = 0
+  Velocity.y[eid] = 0
+
+  const baseHP = ENEMY_BASE_HP + Math.floor(wave / 2)
+  const hp     = Math.max(8, Math.round(baseHP * ELITE_HP_MULT))
+  addComponent(world, Health, eid)
+  Health.current[eid] = hp
+  Health.max[eid]     = hp
+
+  addComponent(world, Enemy, eid)
+  Enemy.speed[eid]          = enemySpeedForWave(wave) * ELITE_SPEED_MULT
+  Enemy.damage[eid]         = ENEMY_DAMAGE * ELITE_DAMAGE_MULT
+  Enemy.attackCooldown[eid] = ENEMY_ATTACK_COOLDOWN * 0.8
+  Enemy.lastAttack[eid]     = 0
+  Enemy.splitsOnDeath[eid]  = 0
+
+  addComponent(world, Collider, eid)
+  Collider.radius[eid] = ENEMY_RADIUS * ELITE_SCALE
+
+  addComponent(world, IsElite, eid)
+
+  addComponent(world, Renderable, eid)
+  Renderable.textureId[eid] = TextureId.Elite
+  Renderable.tint[eid]      = 0xffd700   // gold
+  Renderable.scale[eid]     = ELITE_SCALE
 }
 
 /** Spawn a single enemy entity using the given archetype */
@@ -224,6 +266,8 @@ export function spawnerSystem(world: GameWorld, aliveEnemyCount: number): void {
       state.inGrace          = false
       state.enemiesRemaining = enemyCountForWave(world.wave)
       state.spawnTimer       = 0
+      // Spawn 1 elite per wave starting wave 2; +1 extra every 3 waves
+      state.elitesPending    = world.wave >= 2 ? 1 + Math.floor((world.wave - 2) / 3) : 0
       _onWaveStart?.(world.wave)
     }
     return
@@ -235,6 +279,12 @@ export function spawnerSystem(world: GameWorld, aliveEnemyCount: number): void {
       state.spawnTimer = 0
       spawnEnemy(world)
       state.enemiesRemaining--
+
+      // Spawn an elite at the midpoint of the wave's spawn queue
+      if (state.elitesPending > 0 && state.enemiesRemaining === Math.floor(enemyCountForWave(world.wave) / 2)) {
+        spawnElite(world)
+        state.elitesPending--
+      }
     }
   } else if (aliveEnemyCount === 0) {
     // All enemies spawned and killed — wave complete

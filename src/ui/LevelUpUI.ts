@@ -1,10 +1,8 @@
 // ---------------------------------------------------------------------------
 // LevelUpUI — 3-card RNG drafting screen (triggered on XP bar fill)
 // ---------------------------------------------------------------------------
-// When the player levels up, the game pauses and this overlay presents
-// 3 randomly chosen cards from the available Peripheral Weapons (List 3)
-// and Passive Catalysts (List 4).  Clicking a card applies its effect
-// and resumes the game.
+// Presents 3 randomly chosen cards from the Peripheral Weapons (List 3)
+// and Passive Catalysts (List 4) pool when the XP bar fills.
 // ---------------------------------------------------------------------------
 
 import {
@@ -13,27 +11,38 @@ import {
 import { GameWorld } from '../ecs/world'
 
 // ---------------------------------------------------------------------------
-// Item definitions — MVP subset (2 from each list per GDD)
+// Collectible type — shared by LevelUpUI and RouletteUI
 // ---------------------------------------------------------------------------
 
 export type ItemCategory = 'peripheral' | 'catalyst'
 
-export interface LevelUpItem {
+/**
+ * A single collectible item: either a Peripheral Weapon (Sub-Weapon, List 3)
+ * or a Passive Catalyst (Evolution Key, List 4).
+ */
+export interface Collectible {
   id:          string
   category:    ItemCategory
+  /** Display name — matches MASTER_DOC exactly */
   name:        string
+  /** One-line effect description shown on the card */
   description: string
   color:       number       // card accent color
   apply:       (world: GameWorld) => void
 }
 
-export const ITEMS: LevelUpItem[] = [
-  // ── List 3: Peripheral Weapons ──────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Item registry — List 3 + List 4 (MVP subset per MASTER_DOC §Appendix A)
+// ---------------------------------------------------------------------------
+
+export const COLLECTIBLES: Collectible[] = [
+  // ── List 3: Peripheral Weapons (Sub-Weapons) ─────────────────────────────
+  // Acquired from level-up (XP fill).
   {
     id: 'orbital_buzzsaw',
     category: 'peripheral',
     name: 'Orbital Buzzsaw',
-    description: 'Summons rotating energy blades around the Nexus.\n+1% Damage.',
+    description: 'Rotating energy blades surround the Nexus.\n+1% Damage.',
     color: 0xff6600,
     apply(world) {
       world.peripherals.push('orbital_buzzsaw')
@@ -45,7 +54,7 @@ export const ITEMS: LevelUpItem[] = [
     id: 'seeker_missile',
     category: 'peripheral',
     name: 'Seeker Missile Pod',
-    description: 'Every few seconds, missiles auto-target elite enemies.\n+1.5% Fire Rate.',
+    description: 'Missiles auto-target Elite/Boss enemies on the map.\n+1.5% Fire Rate.',
     color: 0xff3333,
     apply(world) {
       world.peripherals.push('seeker_missile')
@@ -53,7 +62,8 @@ export const ITEMS: LevelUpItem[] = [
     },
   },
 
-  // ── List 4: Passive Catalysts ────────────────────────────────────────────
+  // ── List 4: Passive Catalysts (Evolution Keys) ───────────────────────────
+  // Acquired from level-up AND Roulette (chest drops).
   {
     id: 'hyper_coolant',
     category: 'catalyst',
@@ -69,7 +79,7 @@ export const ITEMS: LevelUpItem[] = [
     id: 'overclock_chip',
     category: 'catalyst',
     name: 'Overclock Chip',
-    description: 'Overclocks the Nexus drive systems.\n+3% Move Speed & Projectile Speed.',
+    description: 'Overclocks Nexus drive systems.\n+3% Move Speed & Projectile Speed.',
     color: 0xffee00,
     apply(world) {
       world.catalysts.push('overclock_chip')
@@ -81,7 +91,7 @@ export const ITEMS: LevelUpItem[] = [
     id: 'uranium_core',
     category: 'catalyst',
     name: 'Uranium Core',
-    description: 'Fission core amplifies damage output.\n+4% Damage Multiplier.',
+    description: 'Fission core amplifies all damage output.\n+4% Damage Multiplier.',
     color: 0x66ff33,
     apply(world) {
       world.catalysts.push('uranium_core')
@@ -104,7 +114,7 @@ export const ITEMS: LevelUpItem[] = [
     id: 'exo_casing',
     category: 'catalyst',
     name: 'Exo-Casing',
-    description: 'Shell plating reinforcement.\n+5% Max HP & 1.5% Damage Reduction.',
+    description: 'Heavy shell plating reinforcement.\n+5% Max HP & 1.5% Damage Reduction.',
     color: 0x88aaff,
     apply(world) {
       world.catalysts.push('exo_casing')
@@ -112,7 +122,21 @@ export const ITEMS: LevelUpItem[] = [
       world.stats.armorFlat  = Math.min(0.85, world.stats.armorFlat + 0.015)
     },
   },
+  {
+    id: 'replicator_matrix',
+    category: 'catalyst',
+    name: 'Replicator Matrix',
+    description: 'Global multiplier to Multishot & SpawnCount.\n+1 Projectile per salvo.',
+    color: 0xff88ff,
+    apply(world) {
+      world.catalysts.push('replicator_matrix')
+      world.stats.multishotAdd += 1
+    },
+  },
 ]
+
+// Convenience lookup by id
+export const COLLECTIBLE_MAP = new Map(COLLECTIBLES.map(c => [c.id, c]))
 
 // ---------------------------------------------------------------------------
 // Card dimensions
@@ -141,11 +165,6 @@ export class LevelUpUI {
 
   get visible(): boolean { return this.isOpen }
 
-  /**
-   * Show the drafting screen with 3 random cards.
-   * @param world   — the live game world to apply the chosen item to
-   * @param onPick  — callback once the player selects a card (resumes game)
-   */
   show(world: GameWorld, onPick: () => void): void {
     this.isOpen = true
     this.container.visible = true
@@ -168,31 +187,30 @@ export class LevelUpUI {
     header.y = ORIGIN_Y - 60
     this.container.addChild(header)
 
-    const subtext = new Text('Choose one enhancement', new TextStyle({
-      fill: '#aabbcc', fontSize: 18, fontFamily: 'monospace',
+    const subtext = new Text('Choose a Peripheral Weapon or Passive Catalyst', new TextStyle({
+      fill: '#aabbcc', fontSize: 16, fontFamily: 'monospace',
     }))
     subtext.anchor.set(0.5, 0)
     subtext.x = 640
     subtext.y = ORIGIN_Y - 24
     this.container.addChild(subtext)
 
-    // Pick 3 random unique cards, excluding already-owned duplicates where possible
-    const available = ITEMS.filter(item =>
-      !world.peripherals.includes(item.id) && !world.catalysts.includes(item.id),
+    // 3 random unique cards, avoiding already-owned where possible
+    const available = COLLECTIBLES.filter(c =>
+      !world.peripherals.includes(c.id) && !world.catalysts.includes(c.id),
     )
-    const pool = available.length >= 3 ? available : ITEMS   // fallback to all if low variety
+    const pool   = available.length >= 3 ? available : COLLECTIBLES
     const chosen = shuffled(pool).slice(0, 3)
 
     chosen.forEach((item, idx) => {
       const cardX = ORIGIN_X + idx * (CARD_W + CARD_GAP)
       const card  = this.buildCard(item, cardX, ORIGIN_Y)
 
-      // Hover effect
       card.interactive = true
       card.cursor = 'pointer'
-      card.on('pointerover',  () => card.scale.set(1.04))
-      card.on('pointerout',   () => card.scale.set(1.0))
-      card.on('pointertap',   () => {
+      card.on('pointerover', () => card.scale.set(1.04))
+      card.on('pointerout',  () => card.scale.set(1.0))
+      card.on('pointertap',  () => {
         item.apply(world)
         this.hide()
         onPick()
@@ -207,12 +225,11 @@ export class LevelUpUI {
     this.container.visible = false
   }
 
-  private buildCard(item: LevelUpItem, cx: number, cy: number): Container {
+  private buildCard(item: Collectible, cx: number, cy: number): Container {
     const card = new Container()
     card.x = cx
     card.y = cy
 
-    // Card background
     const bg = new Graphics()
     bg.lineStyle(2, item.color, 0.9)
     bg.beginFill(0x0d1526, 0.95)
@@ -220,16 +237,15 @@ export class LevelUpUI {
     bg.endFill()
     card.addChild(bg)
 
-    // Category badge
-    const badgeColor = item.category === 'catalyst' ? '#00ccff' : '#ff8833'
-    const badge = new Text(
-      item.category === 'catalyst' ? '◆ CATALYST' : '⚙ PERIPHERAL',
-      new TextStyle({ fill: badgeColor, fontSize: 11, fontFamily: 'monospace', fontWeight: 'bold' }),
-    )
+    // Category label with correct MASTER_DOC names
+    const catLabel = item.category === 'peripheral' ? '◆ PERIPHERAL WEAPON' : '● PASSIVE CATALYST'
+    const catColor = item.category === 'peripheral' ? '#ff8833'             : '#00ccff'
+    const badge = new Text(catLabel, new TextStyle({
+      fill: catColor, fontSize: 11, fontFamily: 'monospace', fontWeight: 'bold',
+    }))
     badge.x = 12; badge.y = 12
     card.addChild(badge)
 
-    // Item name
     const name = new Text(item.name, new TextStyle({
       fill: '#ffffff', fontSize: 18, fontFamily: 'monospace', fontWeight: 'bold',
       wordWrap: true, wordWrapWidth: CARD_W - 24,
@@ -237,13 +253,11 @@ export class LevelUpUI {
     name.x = 12; name.y = 38
     card.addChild(name)
 
-    // Divider
     const div = new Graphics()
     div.lineStyle(1, item.color, 0.5)
     div.moveTo(12, 68); div.lineTo(CARD_W - 12, 68)
     card.addChild(div)
 
-    // Description
     const desc = new Text(item.description, new TextStyle({
       fill: '#aabbcc', fontSize: 13, fontFamily: 'monospace',
       wordWrap: true, wordWrapWidth: CARD_W - 24,
@@ -251,7 +265,6 @@ export class LevelUpUI {
     desc.x = 12; desc.y = 78
     card.addChild(desc)
 
-    // "Click to select" prompt at bottom
     const prompt = new Text('[ Click to select ]', new TextStyle({
       fill: item.color, fontSize: 12, fontFamily: 'monospace',
     }))

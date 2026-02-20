@@ -56,6 +56,12 @@ export const ExperienceGem = defineComponent({
   attracting: Types.ui8,   // 1 when within pickup radius (magnetised toward nexus)
 })
 
+/** Tag: marks an entity as an Elite enemy (drops Golden Chest on death) */
+export const IsElite = defineComponent()
+
+/** Golden Chest — dropped by elites, triggers Roulette when collected */
+export const GoldenChest = defineComponent()
+
 /** Tag: this entity is the Nexus (player) */
 export const IsNexus = defineComponent()
 

@@ -6,8 +6,8 @@
 // both radius and damage scale with max HP.
 // ---------------------------------------------------------------------------
 
-import { defineQuery, removeEntity } from 'bitecs'
-import { Position, Health, Enemy } from '../ecs/components'
+import { defineQuery, hasComponent, removeEntity } from 'bitecs'
+import { Position, Health, Enemy, IsElite } from '../ecs/components'
 import { GameWorld } from '../ecs/world'
 import { BASE_NEXUS_MAX_HP } from '../constants'
 
@@ -51,8 +51,10 @@ export function auraSystem(world: GameWorld): void {
 
     Health.current[eid] -= auraDmg
     if (Health.current[eid] <= 0) {
-      world.score += spk
+      world.score += hasComponent(world, IsElite, eid) ? spk * 5 : spk
       world.pendingGems.push({ x: Position.x[eid], y: Position.y[eid] })
+      if (hasComponent(world, IsElite, eid))
+        world.pendingChests.push({ x: Position.x[eid], y: Position.y[eid] })
       if (Enemy.splitsOnDeath[eid] === 1) {
         world.pendingSplits.push({ x: Position.x[eid], y: Position.y[eid] })
       }

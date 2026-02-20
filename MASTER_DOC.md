@@ -50,34 +50,35 @@ The game shifts from a static tower defense to a highly mobile, high-stakes surv
 *(This is the step-by-step guide for AI implementation. One phase per session to manage token limits).*
 
 **Phase 1: Foundation (COMPLETED)**
+
 * Core loop, basic ECS setup, rendering, and base Skill Tree data structure implemented.
 
+**Phase 2: Mobility & The Economy Loop (COMPLETED)**
 
-**Phase 2: Mobility & The Economy Loop (NEXT PRIORITY)**
-* **Movement System:** Implement WASD/Arrow key movement with acceleration and friction. Update camera to follow the Nexus.
-* **Targeting System:** Implement strict Auto-Aim logic (target nearest/highest HP) for directional weapons like lasers. Fix existing Keystone coordinate bugs.
-* **Gem Economy:** Implement `ExperienceGem` drops on enemy death and `GemCollectionSystem` via player collision.
+* Movement System, Strict Auto-Aim logic, Gem Economy, and GemCollectionSystem.
 
+**Phase 3: The Casino & The Swarm (NEXT PRIORITY)**
 
-**Phase 3: The Casino & The Swarm**
-* **Elites & Chests:** Spawn Elite enemies that drop Golden Chests.
-* **Roulette UI:** Implement the game-pause Slot Machine UI when a chest is collected to grant random passive catalysts (e.g., *Hyper-Coolant*, *Uranium Core*).
-
+* **The AI Director (Foundation):** Create `WaveManagerSystem` to control enemy spawn logic dynamically instead of random intervals.
+* **Elites & Chests:** The AI Director spawns Elite enemies (e.g., Shielded/Nullifiers) that drop Golden Chests.
+* **Roulette UI:** Implement the game-pause Slot Machine UI when a chest is collected to grant random Passive Catalysts.
 
 **Phase 4: Infinite Synergy & Weapon Evolutions**
+
 * **Additive Systems:** Refactor Weapon Systems so Keystones run completely parallel in ECS.
 * **Evolution System:** Create the logic that checks if a maxed Skill Branch + a specific Passive Catalyst are owned to spawn an "Evolution Weapon Component" (1-to-1 lock and key).
 
-
 **Phase 5: Rebuilding Civilization (Meta-Progression)**
-* **The 15-Wave Cap:** Restructure the wave spawner to end at Wave 15 with a Boss fight.
-* **Main Menu Base Building:** Create the UI and logic for spending collected "Ancient Steel" to upgrade City Buildings (granting permanent global buffs and advancing the % completion bar).
-* **The Speedrun Tracker:** Track total playtime/runs to win and generate the final "Victory Certificate" for social sharing.
 
+* **The 15-Wave AI Director:** Finalize the wave manager to execute a definitive 15-wave script, ending with a massive Bullet-Hell Boss fight.
+* **Main Menu Base Building:** Create the UI and logic for spending "Ancient Steel" or "Energy" (we need at lest two kind of resouce to prevent spam or boring) to upgrade City Buildings (granting permanent global buffs).
+* **The Speedrun Tracker:** Track total playtime/runs to win and generate the final "Victory Certificate".
 
-**Phase 6: Polish & Contextual Content**
-* Real-world time mutators (weekend events, night-mode enemies).
-* Maximum Juiciness: Camera shake, hit-stop, and floating damage numbers.
+**Phase 6: The Grand Polish (Assets, Audio & Juiciness)**
+
+* **The Asset Flip:** Replace all geometric placeholder graphics with actual 2D sprites, sprite-sheets, and backgrounds using a PIXI Asset Loader.
+* **Audio Manager:** Implement an Audio Pooling system with pitch-shifting for UI clicks, gem collections, and explosions.
+* **Maximum Juiciness:** Real-world time mutators, Camera shake, hit-stop, and floating damage numbers.
 
 ### 5. Game State Management & UI Flow
 To prevent logic conflicts and ensure smooth UI interruptions (e.g., level-ups, skill upgrades), the ECS and Main Loop must adhere to a strict State Machine:
@@ -151,7 +152,7 @@ Upgraded via the Skill Tree using SP. These define the primary auto-attack logic
 
 #### List 3: Peripheral Weapons (Sub-Weapons)
 
-Acquired randomly from Elite Chests (Roulette) or leveling up. They function as independent ECS systems parallel to the Primary Fire.
+Acquired randomly from leveling up. They function as independent ECS systems parallel to the Primary Fire.
 
 1. **Orbital Buzzsaw:** Summons energy blades that constantly rotate around the Nexus, dealing melee damage and pushing enemies back.
 2. **Seeker Missile Pod:** Every 3 seconds, launches missiles into the air that auto-target and crash into the Elite/Boss enemies on the map.

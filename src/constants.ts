@@ -65,6 +65,16 @@ export const BOSS_SPEED           = 55    // px/s — slower but tanky
 export const BOSS_DAMAGE          = 35
 export const BOSS_ATTACK_COOLDOWN = 1.2   // seconds between hits
 
+// Elite enemy
+export const ELITE_HP_MULT       = 6      // HP multiplier vs normal enemy at same wave
+export const ELITE_SPEED_MULT    = 0.65   // slower but tankier
+export const ELITE_SCALE         = 1.9    // visual scale
+export const ELITE_DAMAGE_MULT   = 1.5
+export const ELITE_SCORE_MULT    = 5      // score bonus multiplier per elite kill
+
+// Golden Chest
+export const CHEST_RADIUS        = 16     // collision radius for collection
+
 // Texture IDs (index into textures array)
 export enum TextureId {
   Nexus       = 0,
@@ -78,4 +88,6 @@ export enum TextureId {
   Bomb        = 8,   // pulsing charge indicator — DELAYED_EXPLOSION
   Blackhole   = 9,   // dark gravity well — SPAWN_BLACKHOLE
   Gem         = 10,  // experience gem dropped by enemies
+  Elite       = 11,  // elite enemy — gold heavy circle with crown ring
+  Chest       = 12,  // golden chest dropped by elites
 }

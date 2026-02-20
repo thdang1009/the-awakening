@@ -1,7 +1,7 @@
 import { addComponent, addEntity, defineQuery, hasComponent, removeEntity } from 'bitecs'
 import {
   Position, Collider, Enemy, Projectile, Health, IsNexus, PassThrough,
-  Bomb, Renderable,
+  Bomb, Renderable, IsElite,
 } from '../ecs/components'
 import { GameWorld } from '../ecs/world'
 import { SpatialHashGrid } from '../utils/SpatialHashGrid'
@@ -78,8 +78,10 @@ export function collisionSystem(world: GameWorld): void {
       Health.current[eeid] -= pdmg
       if (Health.current[eeid] <= 0) {
         deadEnemies.add(eeid)
-        world.score += spk
+        world.score += hasComponent(world, IsElite, eeid) ? spk * 5 : spk
         world.pendingGems.push({ x: Position.x[eeid], y: Position.y[eeid] })
+        if (hasComponent(world, IsElite, eeid))
+          world.pendingChests.push({ x: Position.x[eeid], y: Position.y[eeid] })
 
         if (stats.behaviors.has('CHAIN_LIGHTNING')) {
           chainSources.push({ x: Position.x[eeid], y: Position.y[eeid], dmg: pdmg * 0.55 })
@@ -125,8 +127,10 @@ export function collisionSystem(world: GameWorld): void {
         Health.current[ceid] -= src.dmg
         if (Health.current[ceid] <= 0) {
           deadEnemies.add(ceid)
-          world.score += spk
+          world.score += hasComponent(world, IsElite, ceid) ? spk * 5 : spk
           world.pendingGems.push({ x: Position.x[ceid], y: Position.y[ceid] })
+          if (hasComponent(world, IsElite, ceid))
+            world.pendingChests.push({ x: Position.x[ceid], y: Position.y[ceid] })
           if (Enemy.splitsOnDeath[ceid] === 1) {
             world.pendingSplits.push({ x: Position.x[ceid], y: Position.y[ceid] })
           }
@@ -146,8 +150,10 @@ export function collisionSystem(world: GameWorld): void {
         Health.current[ceid] -= src.dmg
         if (Health.current[ceid] <= 0) {
           deadEnemies.add(ceid)
-          world.score += spk
+          world.score += hasComponent(world, IsElite, ceid) ? spk * 5 : spk
           world.pendingGems.push({ x: Position.x[ceid], y: Position.y[ceid] })
+          if (hasComponent(world, IsElite, ceid))
+            world.pendingChests.push({ x: Position.x[ceid], y: Position.y[ceid] })
           if (Enemy.splitsOnDeath[ceid] === 1) {
             world.pendingSplits.push({ x: Position.x[ceid], y: Position.y[ceid] })
           }

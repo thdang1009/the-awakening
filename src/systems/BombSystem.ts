@@ -7,7 +7,7 @@
 // ---------------------------------------------------------------------------
 
 import { defineQuery, hasComponent, removeEntity } from 'bitecs'
-import { Position, Bomb, Health, Enemy, Renderable } from '../ecs/components'
+import { Position, Bomb, Health, Enemy, Renderable, IsElite } from '../ecs/components'
 import { GameWorld } from '../ecs/world'
 
 const bombQuery  = defineQuery([Bomb, Position])
@@ -63,7 +63,10 @@ export function bombSystem(world: GameWorld): void {
 
       Health.current[eid] -= dmg
       if (Health.current[eid] <= 0) {
-        world.score += spk
+        world.score += hasComponent(world, IsElite, eid) ? spk * 5 : spk
+        world.pendingGems.push({ x: Position.x[eid], y: Position.y[eid] })
+        if (hasComponent(world, IsElite, eid))
+          world.pendingChests.push({ x: Position.x[eid], y: Position.y[eid] })
         if (Enemy.splitsOnDeath[eid] === 1) {
           world.pendingSplits.push({ x: Position.x[eid], y: Position.y[eid] })
         }

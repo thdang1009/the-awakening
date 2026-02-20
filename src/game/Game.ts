@@ -17,13 +17,16 @@ import { auraSystem } from '../systems/AuraSystem'
 import { bombSystem } from '../systems/BombSystem'
 import { blackholeSystem } from '../systems/BlackholeSystem'
 import { gemSystem } from '../systems/GemSystem'
+import { chestSystem } from '../systems/ChestSystem'
 import { Enemy } from '../ecs/components'
 import { SkillTreeStore } from '../skilltree/SkillTreeStore'
 import { SkillTreeUI } from '../skilltree/SkillTreeUI'
 import { StreamerMode } from '../streamer/StreamerMode'
 import { StreamerUI } from '../streamer/StreamerUI'
 import { InputManager } from '../input/InputManager'
-import { LevelUpUI, ITEMS } from '../ui/LevelUpUI'
+import { LevelUpUI } from '../ui/LevelUpUI'
+import { RouletteUI } from '../ui/RouletteUI'
+import { PlayerStatusUI } from '../ui/PlayerStatusUI'
 import {
   CANVAS_WIDTH, CANVAS_HEIGHT,
   NEXUS_RADIUS, NEXUS_X, NEXUS_Y,
@@ -87,11 +90,12 @@ export class Game {
   private contextBadge!: Text | null
   private gameOverContainer!: Container
   private waveResultText!: Text
-  private inventoryPanel!: Container  // left-side collected items list
-  private inventoryOpen = false       // toggled by Shift key
+  private statusHint!: Text           // small HUD badge showing item counts
 
   private treeUI!: SkillTreeUI
   private levelUpUI!: LevelUpUI
+  private rouletteUI!: RouletteUI
+  private playerStatusUI!: PlayerStatusUI
   private streamerMode!: StreamerMode
   private streamerUI!: StreamerUI
   private nexusPulseTimer = 0
@@ -113,7 +117,9 @@ export class Game {
     this.buildScene()
     this.buildTreeButton()
     this.treeUI    = new SkillTreeUI(this.app, new Container())
-    this.levelUpUI = new LevelUpUI(this.app)
+    this.levelUpUI     = new LevelUpUI(this.app)
+    this.rouletteUI    = new RouletteUI(this.app)
+    this.playerStatusUI = new PlayerStatusUI(this.app)
 
     this.streamerMode = new StreamerMode()
     this.streamerUI   = new StreamerUI(this.app, this.streamerMode)
@@ -138,8 +144,7 @@ export class Game {
       if (e.code === 'Tab') { e.preventDefault(); this.toggleTree() }
       if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
         e.preventDefault()
-        this.inventoryOpen = !this.inventoryOpen
-        this.rebuildInventory()
+        this.playerStatusUI.toggle(this.world)
       }
     })
 
@@ -224,8 +229,40 @@ export class Game {
     gmG.drawPolygon([0, -5, 3, 0, 0, 5, -3, 0])
     const gemTex = r.generateTexture(gmG); gmG.destroy()
 
+    // Elite (TextureId.Elite = 11) — gold heavy circle with crown-spike outer ring
+    const elG = new Graphics()
+    const ER = ENEMY_RADIUS * 1.9
+    elG.beginFill(0xffffff, 0.18); elG.drawCircle(0, 0, ER + 8); elG.endFill()
+    elG.beginFill(0xffffff);       elG.drawCircle(0, 0, ER);      elG.endFill()
+    elG.lineStyle(3, 0xffffff, 1); elG.drawCircle(0, 0, ER - 6)
+    // Crown spikes
+    const spikes = 8
+    for (let s = 0; s < spikes; s++) {
+      const a = (s / spikes) * Math.PI * 2
+      const ir = ER + 4, or = ER + 12
+      elG.lineStyle(2, 0xffffff, 0.9)
+      elG.moveTo(Math.cos(a) * ir, Math.sin(a) * ir)
+      elG.lineTo(Math.cos(a) * or, Math.sin(a) * or)
+    }
+    elG.beginFill(0xffffff, 0.7); elG.drawCircle(0, 0, 7); elG.endFill()
+    const eliteTex = r.generateTexture(elG); elG.destroy()
+
+    // Chest (TextureId.Chest = 12) — gold spinning diamond with inner cross
+    const chG = new Graphics()
+    const CR = 16
+    chG.beginFill(0xffffff, 0.25); chG.drawCircle(0, 0, CR + 6); chG.endFill()
+    chG.lineStyle(2, 0xffffff, 0.6); chG.drawCircle(0, 0, CR + 4)
+    chG.beginFill(0xffffff)
+    chG.drawPolygon([0, -(CR), CR, 0, 0, CR, -CR, 0])
+    chG.endFill()
+    chG.lineStyle(2, 0xffffff, 0.9)
+    chG.moveTo(0, -(CR - 4)); chG.lineTo(0,  CR - 4)
+    chG.moveTo(-(CR - 4), 0); chG.lineTo( CR - 4, 0)
+    chG.beginFill(0xffffff, 0.9); chG.drawCircle(0, 0, 4); chG.endFill()
+    const chestTex = r.generateTexture(chG); chG.destroy()
+
     return [nexusTex, enemyTex, projTex, bossTex, fastTex, bruteTex, swarmTex, shadowTex,
-            bombTex, blackholeTex, gemTex]
+            bombTex, blackholeTex, gemTex, eliteTex, chestTex]
   }
 
   // ---------------------------------------------------------------------------
@@ -317,11 +354,12 @@ export class Game {
     this.levelText.x = CANVAS_WIDTH / 2; this.levelText.y = 43
     ui.addChild(this.levelText)
 
-    // ── Inventory panel (left side, below wave text) ─────────────────────
-    this.inventoryPanel = new Container()
-    this.inventoryPanel.x = 10
-    this.inventoryPanel.y = 44
-    this.app.stage.addChild(this.inventoryPanel)
+    // ── Status hint (left side, below wave text) ─────────────────────────
+    this.statusHint = new Text('◆0  ●0   [Shift] Status', new TextStyle({
+      fill: '#445566', fontSize: 12, fontFamily: 'monospace',
+    }))
+    this.statusHint.x = 20; this.statusHint.y = 44
+    ui.addChild(this.statusHint)
 
     // Context event badge
     this.contextBadge = null
@@ -366,109 +404,13 @@ export class Game {
   }
 
   // ---------------------------------------------------------------------------
-  // Inventory panel — left-side list of acquired peripherals & catalysts
+  // Status hint — small HUD badge showing acquired item counts
   // ---------------------------------------------------------------------------
 
-  private rebuildInventory(): void {
-    this.inventoryPanel.removeChildren()
-
-    const all    = [...(this.world?.peripherals ?? []), ...(this.world?.catalysts ?? [])]
-    const meta   = new Map(ITEMS.map(it => [it.id, it]))
-    const counts = new Map<string, number>()
-    for (const id of all) counts.set(id, (counts.get(id) ?? 0) + 1)
-
-    const PAD    = 6
-    const panelW = 178
-    const HEADER_H = 22
-
-    // ── Header tab — always visible ──────────────────────────────────────
-    const arrow     = this.inventoryOpen ? '▼' : '▶'
-    const itemCount = all.length
-    const headerBg  = new Graphics()
-    headerBg.beginFill(0x060c1a, 0.85)
-    headerBg.lineStyle(1, 0x2244aa, 0.9)
-    headerBg.drawRoundedRect(0, 0, panelW, HEADER_H, 5)
-    headerBg.endFill()
-    headerBg.interactive = true
-    headerBg.cursor = 'pointer'
-    headerBg.on('pointertap', () => {
-      this.inventoryOpen = !this.inventoryOpen
-      this.rebuildInventory()
-    })
-    this.inventoryPanel.addChild(headerBg)
-
-    const headerLabel = itemCount > 0
-      ? `${arrow} ITEMS  (${itemCount})  [Shift]`
-      : `${arrow} ITEMS  [Shift]`
-    const headerTxt = new Text(headerLabel, new TextStyle({
-      fill: '#7799cc', fontSize: 12, fontFamily: 'monospace', fontWeight: 'bold',
-    }))
-    headerTxt.x = PAD; headerTxt.y = (HEADER_H - 12) / 2
-    this.inventoryPanel.addChild(headerTxt)
-
-    if (!this.inventoryOpen || counts.size === 0) {
-      // Collapsed or no items — optionally show empty hint
-      if (this.inventoryOpen && counts.size === 0) {
-        const emptyBg = new Graphics()
-        emptyBg.beginFill(0x060c1a, 0.75)
-        emptyBg.lineStyle(1, 0x223355, 0.6)
-        emptyBg.drawRoundedRect(0, HEADER_H + 2, panelW, 24, 5)
-        emptyBg.endFill()
-        this.inventoryPanel.addChild(emptyBg)
-
-        const emptyTxt = new Text('  No items yet', new TextStyle({
-          fill: '#445566', fontSize: 11, fontFamily: 'monospace',
-        }))
-        emptyTxt.x = PAD; emptyTxt.y = HEADER_H + 2 + 5
-        this.inventoryPanel.addChild(emptyTxt)
-      }
-      return
-    }
-
-    // ── Expanded item list ────────────────────────────────────────────────
-    const ROW_H  = 22
-    const DOT    = 8
-    const listH  = counts.size * ROW_H + PAD * 2
-
-    const listBg = new Graphics()
-    listBg.beginFill(0x060c1a, 0.80)
-    listBg.lineStyle(1, 0x223355, 0.7)
-    listBg.drawRoundedRect(0, HEADER_H + 2, panelW, listH, 5)
-    listBg.endFill()
-    this.inventoryPanel.addChild(listBg)
-
-    let row = 0
-    for (const [id, count] of counts) {
-      const item  = meta.get(id)
-      const color = item?.color    ?? 0xaaaaaa
-      const name  = item?.name     ?? id
-      const cat   = item?.category ?? 'catalyst'
-
-      const y = HEADER_H + 2 + PAD + row * ROW_H
-
-      // Dot: diamond = peripheral, circle = catalyst
-      const dot = new Graphics()
-      dot.beginFill(color, 0.9)
-      if (cat === 'peripheral') {
-        dot.drawPolygon([DOT / 2, 0, DOT, DOT / 2, DOT / 2, DOT, 0, DOT / 2])
-      } else {
-        dot.drawCircle(DOT / 2, DOT / 2, DOT / 2)
-      }
-      dot.endFill()
-      dot.x = PAD
-      dot.y = y + (ROW_H - DOT) / 2
-      this.inventoryPanel.addChild(dot)
-
-      const label = count > 1 ? `${name}  ×${count}` : name
-      const txt   = new Text(label, new TextStyle({
-        fill: '#bbccdd', fontSize: 11, fontFamily: 'monospace',
-      }))
-      txt.x = PAD + DOT + 5
-      txt.y = y + (ROW_H - 12) / 2
-      this.inventoryPanel.addChild(txt)
-
-      row++
-    }
+  private refreshStatusHint(): void {
+    const p = this.world?.peripherals.length ?? 0
+    const c = this.world?.catalysts.length   ?? 0
+    this.statusHint.text = `◆${p}  ●${c}   [Shift] Status`
   }
 
   private buildTreeButton(): void {
@@ -550,7 +492,7 @@ export class Game {
     this.scoreText.text  = 'Score: 0'
     this.levelText.text  = 'Lv.1'
     this.gameOverContainer.visible = false
-    this.rebuildInventory()
+    this.refreshStatusHint()
   }
 
   private createNexus(): void {
@@ -621,7 +563,7 @@ export class Game {
 
     const treeNowOpen = this.treeUI?.isOpen ?? false
     const justClosed  = this.treePrevOpen && !treeNowOpen
-    this.world.paused  = treeNowOpen || this.world.levelUpPause
+    this.world.paused  = treeNowOpen || this.world.levelUpPause || this.world.roulettePause
     this.treePrevOpen  = treeNowOpen
 
     if (justClosed) {
@@ -632,6 +574,7 @@ export class Game {
 
     this.treeUI?.animate(dt)
     this.streamerUI?.animate(dt)
+    this.rouletteUI?.animate(dt)
 
     if (this.world.gameOver) {
       this.waveResultText.text =
@@ -640,7 +583,7 @@ export class Game {
       return
     }
 
-    // Level-up card screen: game paused, show overlay if not already visible
+    // Level-up card screen
     if (this.world.pendingLevelUp && !this.world.levelUpPause) {
       this.world.pendingLevelUp = false
       this.world.levelUpPause   = true
@@ -649,7 +592,19 @@ export class Game {
         this.world.levelUpPause = false
         this.world.paused       = this.treeUI?.isOpen ?? false
         this.levelText.text = `Lv.${this.world.level}`
-        this.rebuildInventory()
+        this.refreshStatusHint()
+      })
+    }
+
+    // Roulette slot machine: triggered when player collects a golden chest
+    if (this.world.pendingRoulette && !this.world.roulettePause) {
+      this.world.pendingRoulette = false
+      this.world.roulettePause   = true
+      this.world.paused          = true
+      this.rouletteUI.show(this.world, () => {
+        this.world.roulettePause = false
+        this.world.paused        = this.treeUI?.isOpen ?? false
+        this.refreshStatusHint()
       })
     }
 
@@ -690,6 +645,7 @@ export class Game {
     blackholeSystem(this.world)
     lifetimeSystem(this.world)
     gemSystem(this.world)
+    chestSystem(this.world)
 
     const aliveEnemies = enemyQuery(this.world).length
     spawnerSystem(this.world, aliveEnemies)
