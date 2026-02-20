@@ -15,18 +15,18 @@
 
 The game shifts from a static tower defense to a highly mobile, high-stakes survival experience inspired by *Vampire Survivors*, enhanced by *The Tipping Point* virality concepts.
 
-* **1. Risk & Reward (The Core Loop):**
+**1. Risk & Reward (The Core Loop):**
 * *Movement is Mandatory:* The Nexus must move (WASD/Joystick) to dodge enemies.
 * *Experience Gems:* Enemies do not give XP automatically. They drop gems. The player must risk diving into enemy swarms to collect them.
 
 
-* **2. The Dopamine Engine (Combat & Juiciness):**
+**2. The Dopamine Engine (Combat & Juiciness):**
 * *Additive Keystones:* Skill tree ultimate nodes (Keystones) DO NOT override each other. They run in parallel (e.g., firing Lasers while surrounded by a Blackhole Aura).
 * *1-to-1 Weapon Evolutions:* Collecting specific passive items unlocks "Evolutions" for maxed-out skill branches (e.g., Laser + Graviton Lens = Quasar Beam).
 * *Slot Machine Chests:* Elite enemies drop Golden Chests. Collecting them pauses the game and triggers a flashing Roulette UI that grants massive random buffs.
 
 
-* **3. Meta-Progression (Rebuilding Civilization):**
+**3. Meta-Progression (Rebuilding Civilization):**
 * *Definitive Ending:* The game is not infinitely grinding for nothing. The ultimate goal is to reach 100% "City Rebuilt" on the Main Menu.
 * *Pacing:* Each run lasts exactly 15 Waves (~15 minutes). Beating Wave 15 defeats the Boss and yields massive "Reconstruction Materials".
 * *Speedrun Bait:* The game tracks the total number of runs and total in-game time taken to reach 100% City Rebuilt, encouraging players to share their speedrun records online.
@@ -49,33 +49,33 @@ The game shifts from a static tower defense to a highly mobile, high-stakes surv
 
 *(This is the step-by-step guide for AI implementation. One phase per session to manage token limits).*
 
-* **Phase 1: Foundation (COMPLETED)**
+**Phase 1: Foundation (COMPLETED)**
 * Core loop, basic ECS setup, rendering, and base Skill Tree data structure implemented.
 
 
-* **Phase 2: Mobility & The Economy Loop (NEXT PRIORITY)**
+**Phase 2: Mobility & The Economy Loop (NEXT PRIORITY)**
 * **Movement System:** Implement WASD/Arrow key movement with acceleration and friction. Update camera to follow the Nexus.
 * **Targeting System:** Implement strict Auto-Aim logic (target nearest/highest HP) for directional weapons like lasers. Fix existing Keystone coordinate bugs.
 * **Gem Economy:** Implement `ExperienceGem` drops on enemy death and `GemCollectionSystem` via player collision.
 
 
-* **Phase 3: The Casino & The Swarm**
+**Phase 3: The Casino & The Swarm**
 * **Elites & Chests:** Spawn Elite enemies that drop Golden Chests.
 * **Roulette UI:** Implement the game-pause Slot Machine UI when a chest is collected to grant random passive catalysts (e.g., *Hyper-Coolant*, *Uranium Core*).
 
 
-* **Phase 4: Infinite Synergy & Weapon Evolutions**
+**Phase 4: Infinite Synergy & Weapon Evolutions**
 * **Additive Systems:** Refactor Weapon Systems so Keystones run completely parallel in ECS.
 * **Evolution System:** Create the logic that checks if a maxed Skill Branch + a specific Passive Catalyst are owned to spawn an "Evolution Weapon Component" (1-to-1 lock and key).
 
 
-* **Phase 5: Rebuilding Civilization (Meta-Progression)**
+**Phase 5: Rebuilding Civilization (Meta-Progression)**
 * **The 15-Wave Cap:** Restructure the wave spawner to end at Wave 15 with a Boss fight.
 * **Main Menu Base Building:** Create the UI and logic for spending collected "Ancient Steel" to upgrade City Buildings (granting permanent global buffs and advancing the % completion bar).
 * **The Speedrun Tracker:** Track total playtime/runs to win and generate the final "Victory Certificate" for social sharing.
 
 
-* **Phase 6: Polish & Contextual Content**
+**Phase 6: Polish & Contextual Content**
 * Real-world time mutators (weekend events, night-mode enemies).
 * Maximum Juiciness: Camera shake, hit-stop, and floating damage numbers.
 
@@ -178,8 +178,8 @@ Other notes:
 
 Chúng ta đã bàn về việc nhặt Ngọc XP, nhưng chưa chốt **chuyện gì xảy ra khi thanh XP đầy?**
 
-* **Vấn đề:** Trong VS, lên cấp thì hiện ra 3 món ngẫu nhiên để chọn. Nhưng game của mình lại có cái Skill Tree 49 nodes (dùng SP thưởng mỗi wave). Vậy 2 cái này hoạt động song song thế nào để người chơi không bị lú?
-* **Giải pháp chốt hạ:**
+**Vấn đề:** Trong VS, lên cấp thì hiện ra 3 món ngẫu nhiên để chọn. Nhưng game của mình lại có cái Skill Tree 49 nodes (dùng SP thưởng mỗi wave). Vậy 2 cái này hoạt động song song thế nào để người chơi không bị lú?
+**Giải pháp chốt hạ:**
 * **Primary Fire (Nhánh Skill Tree):** Chỉ được nâng cấp sau khi **Clear Wave** (nhận 2 SP). Giao diện Skill Tree hiện ra để bro cộng điểm. Cái này là *Sự chắc chắn (Deterministic)*.
 * **Sub-Weapons & Passives (Danh sách 3 & 4):** Nhận được khi **Lên Cấp (Nhặt đủ Ngọc XP)**. Khi thanh XP đầy, game Pause, hiện ra 3 thẻ bài ngẫu nhiên (RNG) để bro chọn (Ví dụ: Nhặt Lưỡi cưa, hay nhặt Lõi tản nhiệt?). Cái này tạo ra *Sự may rủi (Roguelite)*.
 
